@@ -75,6 +75,7 @@ export function SliderField({
   unit,
   onChange,
   hint,
+  format,
 }: {
   id: string
   label: string
@@ -85,6 +86,8 @@ export function SliderField({
   unit: string
   onChange: (v: number) => void
   hint?: ReactNode
+  /** Display format for the numeric input; the exact value is kept and min/max still clamp exactly */
+  format?: (v: number) => string
 }) {
   const commit = (raw: string) => {
     const v = Number(raw)
@@ -92,14 +95,16 @@ export function SliderField({
   }
   // Draft text lets users type freely; the value is clamped on blur / Enter
   const [draft, setDraft] = useState<string | null>(null)
+  // Controls snap to the displayed precision (e.g. 45.3 for a 45.3036 minimum); commit() clamps to the exact range
+  const shown = (v: number) => (format ? Number(format(v)) : v)
   return (
     <Field label={label} htmlFor={id} hint={hint}>
       <div className="flex items-center gap-3">
         <input
           type="range"
           aria-label={label}
-          min={min}
-          max={max}
+          min={shown(min)}
+          max={shown(max)}
           step={step}
           value={value}
           onChange={(e) => commit(e.target.value)}
@@ -109,10 +114,10 @@ export function SliderField({
             id={id}
             type="number"
             inputMode="decimal"
-            min={min}
-            max={max}
+            min={shown(min)}
+            max={shown(max)}
             step={step}
-            value={draft ?? String(value)}
+            value={draft ?? (format ? format(value) : String(value))}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => {
               if (draft !== null) commit(draft)

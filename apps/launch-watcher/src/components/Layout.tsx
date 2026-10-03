@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { CalendarClock, Globe2, Radar } from 'lucide-react'
+import { CalendarClock, Globe2, Info, Radar } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import OrbitBackdrop from './OrbitBackdrop'
 import TleDialog from './TleDialog'
@@ -53,7 +53,11 @@ export default function Layout() {
         </div>
       </header>
 
-      <main id="main" className="container flex-1 py-6 lg:py-8">
+      <main id="main" className="container flex-1 space-y-6 py-6 lg:py-8">
+        <p role="note" className="flex items-center gap-2.5 rounded-lg bg-sky-400/10 px-3 py-2 text-sm text-sky-100 ring-1 ring-inset ring-sky-400/25">
+          <Info aria-hidden className="size-4 shrink-0 text-sky-300" />
+          Simulation: Spaceport Nova Scotia's orbital pad is expected to open in 2027–28.
+        </p>
         <Outlet />
       </main>
 
