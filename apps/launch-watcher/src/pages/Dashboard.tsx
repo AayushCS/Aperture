@@ -75,7 +75,7 @@ export default function Dashboard() {
                   <Stat label="Flight azimuth" value={fmt.deg(next.azimuth)} hint={`${compassPoint(next.azimuth)} · ${next.branch} pass`} />
                   <Stat label="Window width" value={fmt.duration(next.duration)} hint="In-plane ± tolerance" />
                   <Stat label="Insertion" value={`T+${fmt.duration(next.insertion.time.getTime() / 1000 - next.optimal.getTime() / 1000)}`} hint={`${fmt.lat(next.insertion.latitude)} ${fmt.lon(next.insertion.longitude)}`} />
-                  <Stat label="Window score" value={`${Math.round(next.quality * 100)} / 100`} hint={`${windows.length} windows in ${mission.spanDays} days`} />
+                  <Stat label="Window score" value={`${Math.round(next.quality * 100)} / 100`} hint={`${windows.length} windows in ${Math.round((plan.input.dateRange.end.getTime() - plan.input.dateRange.start.getTime()) / 86_400_000)} days`} />
                 </dl>
               </CardBody>
             </Card>

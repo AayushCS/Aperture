@@ -2,10 +2,18 @@ import { useEffect, useMemo } from 'react'
 import {
   COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
+  DEFAULT_RAAN_TOLERANCE,
+  EARTH_ROTATION_RAD_S,
+  ORBIT_PLANE,
+  addDays,
   elementsToTle,
   nextWindow,
+  normalizeAngle,
   orbitalEngine,
   raanForLtan,
+  radToDeg,
+  zonedDate,
+  zonedTimeToUtc,
   type CalculationInput,
   type LaunchSite,
   type LaunchWindow,
@@ -14,7 +22,8 @@ import {
   type Tle,
   type VehicleParams,
 } from '@aperture/orbital-core'
-import { useMissionStore, type MissionProfile } from '@/store/mission'
+import { clampSearch, useMissionStore, type MissionProfile } from '@/store/mission'
+import { clampStartDate } from '@/lib/searchRange'
 import { requestScreening, useScreeningStore, type ScreeningState } from '@/store/screening'
 import { useForecast } from './useForecast'
 
@@ -25,8 +34,10 @@ export interface MissionPlan {
   mission: MissionProfile
   site: LaunchSite
   vehicle: VehicleParams
-  /** Designed target orbit (epoch = search start) */
+  /** Designed target orbit (epoch = search start; for LEO / polar with no start date, the plane's local day) */
   orbit: OrbitalElements
+  /** LEO / polar plane anchor (undefined for SSO) */
+  plane: PlaneAnchor | undefined
   /** Generated TLE: the as-flown orbit of the focused window (or the target if there is none) */
   tle: Tle
   input: CalculationInput
@@ -43,32 +54,72 @@ export interface MissionPlan {
   screeningAltitude: number
 }
 
-function startOfSearch(startDate: string): Date {
+function startOfSearch(startDate: string, now: Date = new Date()): Date {
   if (startDate) {
     const d = new Date(`${startDate}T00:00:00Z`)
     if (!Number.isNaN(d.getTime())) return d
   }
   // Begin one hour back so a window that is currently open is still listed
-  return new Date(Date.now() - 60 * 60 * 1000)
+  return new Date(now.getTime() - 60 * 60 * 1000)
 }
 
-/** The user's orbit, designed to inject at perigee from the spaceport */
-export function designMissionOrbit(mission: MissionProfile, epoch: Date): OrbitalElements {
-  return orbitalEngine.designOrbit({
+/** How the LEO / polar plane is anchored: the local date and instant whose insertion defines it */
+export interface PlaneAnchor {
+  /** Site-local calendar date (YYYY-MM-DD) of the defining insertion */
+  localDate: string
+  /** Plane epoch: the search start, or local midnight of `localDate` when the start is "now" */
+  epoch: Date
+  /** Orbit insertion on the first allowed pass of `localDate` at ORBIT_PLANE.insertionLocalTime */
+  insertionTime: Date
+}
+
+/**
+ * Anchor for the LEO / polar plane. With a start date, the plane is set on that date (read
+ * as the site's calendar date). With no start date it is fixed per calendar day — the next day
+ * whose launch window is still ahead — so Ω and the windows don't creep as the clock ticks.
+ */
+export function planeAnchor(mission: MissionProfile, now: Date = new Date()): PlaneAnchor {
+  const tz = SITE.timeZone!
+  const time = ORBIT_PLANE.insertionLocalTime[mission.orbitType === 'POLAR' ? 'POLAR' : 'LEO']
+  // Clamped again here: a stored date can fall out of range when the site's day rolls over
+  const date = clampStartDate(mission.startDate, now, tz) || undefined
+  if (date) return { localDate: date, epoch: new Date(`${date}T00:00:00Z`), insertionTime: zonedTimeToUtc(date, time, tz) }
+  // Move on to tomorrow's plane once today's launch window (liftoff one ascent before insertion) has closed
+  const ascentMs = COMMON_VEHICLES[mission.vehicleId].ascentDuration * 1000
+  const halfWidthMs = (DEFAULT_RAAN_TOLERANCE[mission.orbitType] / radToDeg(EARTH_ROTATION_RAD_S)) * 1000
+  let localDate = zonedDate(now, tz)
+  if (zonedTimeToUtc(localDate, time, tz).getTime() - ascentMs + halfWidthMs <= now.getTime()) localDate = addDays(localDate, 1)
+  return { localDate, epoch: zonedTimeToUtc(localDate, '00:00', tz), insertionTime: zonedTimeToUtc(localDate, time, tz) }
+}
+
+/**
+ * The user's orbit, designed to inject at perigee from the spaceport. LEO / polar: the plane
+ * puts insertion at the anchor's local time (re-solved whenever inclination, perigee or apogee
+ * change), drifting with J2 from there. SSO: the descending node at 10:00 mean local solar time.
+ * `raanOffset` (deg) rotates the plane — used only for decorative reference orbits.
+ */
+export function designMissionOrbit(mission: MissionProfile, start: Date, raanOffset = 0, now: Date = new Date()): OrbitalElements {
+  const design = {
     site: SITE,
     vehicle: COMMON_VEHICLES[mission.vehicleId],
-    epoch,
     perigeeAltitude: mission.perigee,
     apogeeAltitude: mission.apogee,
     inclination: mission.inclination,
-    raan: mission.orbitType === 'SSO' ? raanForLtan(mission.ltan, epoch) : mission.raan,
-  })
+  }
+  if (mission.orbitType === 'SSO') {
+    const raan = raanForLtan(ORBIT_PLANE.ssoDescendingNodeHours + 12, start)
+    return orbitalEngine.designOrbit({ ...design, epoch: start, raan: normalizeAngle(raan + raanOffset) })
+  }
+  const { epoch, insertionTime } = planeAnchor(mission, now)
+  const el = orbitalEngine.designOrbitForInsertion({ ...design, epoch, insertionTime })
+  return raanOffset ? { ...el, raan: normalizeAngle(el.raan + raanOffset) } : el
 }
 
-export function buildInput(mission: MissionProfile, weather?: CalculationInput['weather']): CalculationInput {
-  const start = startOfSearch(mission.startDate)
+export function buildInput(profile: MissionProfile, weather?: CalculationInput['weather'], now: Date = new Date()): CalculationInput {
+  const mission = { ...profile, ...clampSearch(profile, now) }
+  const start = startOfSearch(mission.startDate, now)
   return {
-    orbit: designMissionOrbit(mission, start),
+    orbit: designMissionOrbit(mission, start, 0, now),
     vehicle: COMMON_VEHICLES[mission.vehicleId],
     launchSite: SITE,
     dateRange: { start, end: new Date(start.getTime() + mission.spanDays * 86_400_000) },
@@ -96,10 +147,14 @@ export function useMissionPlan(): MissionPlan {
   const forecastQuery = useForecast(SITE)
 
   const computed = useMemo(() => {
-    const input = buildInput(mission, forecastQuery.data)
-    const analysis = orbitalEngine.analyzeMission(input)
+    const now = new Date()
+    const input = buildInput(mission, forecastQuery.data, now)
+    const raw = orbitalEngine.analyzeMission(input)
+    // Shown once as an app-wide "Simulation" banner instead of on every analysis
+    const analysis = { ...raw, issues: raw.issues.filter((i) => i.code !== 'SITE_NOT_OPERATIONAL') }
     const windows = analysis.feasible ? orbitalEngine.calculateLaunchWindows(input) : []
-    return { input, analysis, windows, orbit: input.orbit }
+    const plane = mission.orbitType === 'SSO' ? undefined : planeAnchor(mission, now)
+    return { input, analysis, windows, orbit: input.orbit, plane }
   }, [mission, forecastQuery.data])
 
   // The screen flies a circular orbit; for elliptical targets it uses the mean altitude (approximation)

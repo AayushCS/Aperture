@@ -1,15 +1,31 @@
-import { useState } from 'react'
-import { ORBIT_ALTITUDE, type MissionAnalysis } from '@aperture/orbital-core'
-import { ORBIT_LIMITS, useMissionStore, type OrbitFamily } from '@/store/mission'
-import { SliderField } from '@/components/ui/Form'
+import type { ReactNode } from 'react'
+import { ORBIT_ALTITUDE, ORBIT_PLANE, maxApogeeAltitude, normalizeAngle, type MissionAnalysis, type OrbitalElements } from '@aperture/orbital-core'
+import { SITE, type PlaneAnchor } from '@/hooks/useMissionPlan'
+import { ORBIT_LIMITS, ssoInclination, useMissionStore, type OrbitFamily } from '@/store/mission'
+import { Field, SliderField, inputClass } from '@/components/ui/Form'
 import { hhmm } from '@/lib/orbitStats'
+import { SEARCH_LIMIT_DAYS, searchDateLimits } from '@/lib/searchRange'
 import { fmt } from '@/lib/format'
 import { cn } from '@/utils/cn'
 
+const deg = (v: number) => `${Number(v.toFixed(1))}°`
+const kmRange = (f: OrbitFamily) => `perigee ${ORBIT_ALTITUDE[f].min}–${ORBIT_ALTITUDE[f].max.toLocaleString('en-US')} km`
+// SSO inclination is computed; its span follows from the allowed perigee / apogee range
+const SSO_INC_RANGE = [
+  ssoInclination(ORBIT_ALTITUDE.SSO.min, ORBIT_ALTITUDE.SSO.min),
+  ssoInclination(ORBIT_ALTITUDE.SSO.max, maxApogeeAltitude('SSO', ORBIT_ALTITUDE.SSO.max)),
+] as const
+
 export const FAMILY_INFO: Record<OrbitFamily, { label: string; blurb: string; color: string }> = {
-  LEO: { label: 'LEO', blurb: 'Low Earth orbit · 45°–80° · stations, constellations, tech demos', color: '#38bdf8' },
-  POLAR: { label: 'Polar', blurb: 'Near 90° · overflies the whole globe every day', color: '#2dd4bf' },
-  SSO: { label: 'Sun-sync', blurb: 'Plane locked to the Sun · same local time every pass', color: '#a78bfa' },
+  LEO: { label: 'LEO', blurb: `Low Earth orbit · ${deg(ORBIT_LIMITS.LEO.minInc)}–${deg(ORBIT_LIMITS.LEO.maxInc)} · ${kmRange('LEO')}`, color: '#38bdf8' },
+  POLAR: { label: 'Polar', blurb: `Near-polar · ${deg(ORBIT_LIMITS.POLAR.minInc)}–${deg(ORBIT_LIMITS.POLAR.maxInc)} · ${kmRange('POLAR')}`, color: '#2dd4bf' },
+  SSO: { label: 'Sun-sync', blurb: `Sun-locked plane · ${deg(SSO_INC_RANGE[0])}–${deg(SSO_INC_RANGE[1])}, set automatically · ${kmRange('SSO')}`, color: '#a78bfa' },
+}
+
+/** Compass direction of travel for an Earth-relative flight azimuth (the site's corridor spans east to south) */
+function headingWord(azimuth: number): string {
+  const words = ['northbound', 'northeastbound', 'eastbound', 'southeastbound', 'southbound', 'southwestbound', 'westbound', 'northwestbound']
+  return words[Math.round(normalizeAngle(azimuth) / 45) % 8]!
 }
 
 /** Orbit-family cards (LEO / Polar / SSO) */
@@ -67,101 +83,107 @@ function FamilyGlyph({ family, active }: { family: OrbitFamily; active: boolean 
   )
 }
 
-/** Orbit inputs for the chosen family */
-export default function OrbitForm({ analysis }: { analysis: MissionAnalysis }) {
+function ReadOnlyField({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
+  return (
+    <Field label={label} hint={hint}>
+      <div className="tabular flex min-h-9 items-center rounded-md border border-input bg-background/40 px-3 py-1.5 text-sm">{value}</div>
+    </Field>
+  )
+}
+
+/** Plane date / search start, bound to mission.startDate; empty = today (follows the clock) */
+function PlaneDateField({ localDate }: { localDate?: string }) {
+  const startDate = useMissionStore((s) => s.mission.startDate)
+  const update = useMissionStore((s) => s.update)
+  const today = !startDate
+  const limits = searchDateLimits(new Date(), SITE.timeZone!)
+  return (
+    <Field
+      label="Plane date / search from"
+      htmlFor="plane-date"
+      hint={`${today ? 'Today — follows the clock (Canso date)' : 'Plane set on this Canso date · search starts 00:00 UTC'} · up to ${SEARCH_LIMIT_DAYS} days ahead`}
+    >
+      <div className="flex gap-2">
+        <input
+          id="plane-date"
+          type="date"
+          className={inputClass}
+          min={limits.today}
+          max={limits.last}
+          value={startDate || localDate || limits.today}
+          onChange={(e) => update({ startDate: e.target.value })}
+        />
+        <button
+          type="button"
+          disabled={today}
+          onClick={() => update({ startDate: '' })}
+          className="h-9 shrink-0 rounded-md border border-input px-3 text-xs font-medium text-primary hover:bg-white/[0.04] disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent"
+        >
+          Today
+        </button>
+      </div>
+    </Field>
+  )
+}
+
+const planeDate = (localDate: string) =>
+  new Date(`${localDate}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+
+/** Orbit inputs for the chosen family. `orbit` is the designed target; `plane` anchors LEO / polar. */
+export default function OrbitForm({ analysis, orbit, plane }: { analysis: MissionAnalysis; orbit: OrbitalElements; plane?: PlaneAnchor }) {
   const mission = useMissionStore((s) => s.mission)
   const update = useMissionStore((s) => s.update)
-  const limits = ORBIT_LIMITS[mission.orbitType]
-  const altRange = ORBIT_ALTITUDE[mission.orbitType]
-  const isDefault = mission.perigee === altRange.defaultKm && mission.apogee === altRange.defaultKm
-  const elliptical = mission.apogee !== mission.perigee
-  // As on testing: altitude is a single default value; the slider lives under "Advanced"
-  const [advancedAlt, setAdvancedAlt] = useState(false)
+  const family = mission.orbitType
+  const alt = ORBIT_ALTITUDE[family]
+  const apogeeMax = maxApogeeAltitude(family, mission.perigee)
+  const circular = mission.apogee === mission.perigee
+  const allowed = analysis.opportunities.find((o) => o.withinCorridor)
 
   return (
     <div className="space-y-6">
       <FamilyPicker />
       <div className="grid gap-5 sm:grid-cols-2">
-        <div className="space-y-2 sm:col-span-2">
-          {advancedAlt ? (
-            <div className="grid gap-5 sm:grid-cols-2">
-              <SliderField
-                id="altitude"
-                label={elliptical ? 'Perigee altitude' : 'Altitude'}
-                unit="km"
-                min={altRange.min}
-                max={altRange.max}
-                step={10}
-                value={mission.perigee}
-                onChange={(v) => update(elliptical ? { perigee: v, apogee: Math.max(v, mission.apogee) } : { perigee: v, apogee: v })}
-                hint={`Default for ${FAMILY_INFO[mission.orbitType].label}: ${altRange.defaultKm} km`}
-              />
-              {elliptical ? (
-                <SliderField
-                  id="apogee"
-                  label="Apogee altitude"
-                  unit="km"
-                  min={altRange.min}
-                  max={altRange.max}
-                  step={10}
-                  value={mission.apogee}
-                  onChange={(v) => update({ apogee: v, perigee: Math.min(v, mission.perigee) })}
-                  hint={
-                    <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => update({ apogee: mission.perigee })}>
-                      Make circular
-                    </button>
-                  }
-                />
-              ) : (
-                <div className="flex items-end pb-1">
-                  <button
-                    type="button"
-                    className="text-xs text-primary underline-offset-2 hover:underline"
-                    onClick={() => update({ apogee: Math.min(altRange.max, mission.perigee + 100) })}
-                  >
-                    Make elliptical (set an apogee)
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <span className="text-xs font-medium text-muted-foreground">Altitude</span>
-              <p className="text-sm">
-                {elliptical ? `${mission.perigee} × ${mission.apogee} km` : `${mission.perigee} km`}{' '}
-                <span className="text-xs text-muted-foreground">{isDefault ? '(default)' : '(custom)'}</span>
-              </p>
-            </div>
-          )}
-          <button
-            type="button"
-            className="text-xs text-primary underline-offset-2 hover:underline"
-            onClick={() => {
-              if (advancedAlt) update({ perigee: altRange.defaultKm, apogee: altRange.defaultKm })
-              setAdvancedAlt((v) => !v)
-            }}
-          >
-            {advancedAlt ? 'Reset to default' : 'Advanced: change altitude'}
-          </button>
-        </div>
-        {mission.orbitType === 'SSO' ? (
+        <SliderField
+          id="perigee"
+          label="Perigee altitude"
+          unit="km"
+          min={alt.min}
+          max={alt.max}
+          step={10}
+          value={mission.perigee}
+          onChange={(perigee) => update({ perigee })}
+          hint={`${alt.min}–${alt.max.toLocaleString('en-US')} km · default ${alt.defaultKm} km`}
+        />
+        <SliderField
+          id="apogee"
+          label="Apogee altitude"
+          unit="km"
+          min={mission.perigee}
+          max={apogeeMax}
+          step={10}
+          value={mission.apogee}
+          onChange={(apogee) => update({ apogee })}
+          hint={
+            circular
+              ? `Equal to perigee: circular · up to ${apogeeMax.toLocaleString('en-US')} km`
+              : `e = ${orbit.eccentricity.toFixed(4)} · up to ${apogeeMax.toLocaleString('en-US')} km`
+          }
+        />
+        {family === 'SSO' ? (
           <>
-            <div className="space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Inclination</span>
-              <div className="tabular flex h-9 items-center rounded-md border border-input bg-background/40 px-3 text-sm">{fmt.deg(mission.inclination, 2)}</div>
-              <p className="text-[11px] text-muted-foreground">Set automatically so the plane turns with the Sun</p>
-            </div>
-            <SliderField
-              id="ltan"
-              label="Local time of ascending node"
-              unit="h"
-              min={0}
-              max={23.75}
-              step={0.25}
-              value={mission.ltan}
-              onChange={(ltan) => update({ ltan })}
-              hint={`Northbound ${hhmm(mission.ltan)} · southbound ${hhmm(mission.ltan + 12)} local solar time`}
+            <ReadOnlyField
+              label="Inclination"
+              value={fmt.deg(mission.inclination, 2)}
+              hint={`Computed from a = ${orbit.semiMajorAxis.toFixed(1)} km, e = ${orbit.eccentricity.toFixed(4)} so the plane turns with the Sun`}
             />
+            <div className="space-y-5">
+              <ReadOnlyField
+                label="Equator crossing"
+                value={`Southbound ${hhmm(ORBIT_PLANE.ssoDescendingNodeHours)} mean local solar time`}
+                hint={`Fixed · northbound ${hhmm(ORBIT_PLANE.ssoDescendingNodeHours + 12)} · Ω ${fmt.deg(orbit.raan, 2)} at search start`}
+              />
+              <PlaneDateField />
+            </div>
           </>
         ) : (
           <>
@@ -169,30 +191,40 @@ export default function OrbitForm({ analysis }: { analysis: MissionAnalysis }) {
               id="inclination"
               label="Inclination"
               unit="°"
-              min={limits.minInc}
-              max={limits.maxInc}
+              min={ORBIT_LIMITS[family].minInc}
+              max={ORBIT_LIMITS[family].maxInc}
               step={0.1}
               value={mission.inclination}
               onChange={(inclination) => update({ inclination })}
-              hint={mission.orbitType === 'LEO' ? 'Canso is at 45.3°N, the lowest reachable inclination' : '90° passes over both poles'}
+              format={(v) => v.toFixed(1)}
+              hint={
+                family === 'LEO'
+                  ? `${deg(ORBIT_LIMITS.LEO.minInc)}–${deg(ORBIT_LIMITS.LEO.maxInc)} · 45.3° is Canso's latitude, flown due east`
+                  : `${deg(ORBIT_LIMITS.POLAR.minInc)}–${deg(ORBIT_LIMITS.POLAR.maxInc)} · 90° passes over both poles`
+              }
             />
-            <SliderField
-              id="raan"
-              label="Plane orientation (RAAN)"
-              unit="°"
-              min={0}
-              max={359.5}
-              step={0.5}
-              value={mission.raan}
-              onChange={(raan) => update({ raan })}
-              hint="At the search start · moves the launch time of day"
-            />
+<div className="space-y-5">
+              <ReadOnlyField
+                label="Plane orientation (RAAN)"
+                value={
+                  plane
+                    ? `Ω = ${fmt.deg(orbit.raan, 2)} on ${planeDate(plane.localDate)} `
+                    : '—'
+                }
+                hint={
+                  plane
+                    ? `${ORBIT_PLANE.insertionLocalTime[family]} ${fmt.zoneName(plane.insertionTime, SITE.timeZone!)} at Canso, liftoff one ascent earlier · then J2 drift ${analysis.nodalPrecessionDegDay.toFixed(3)}°/day`
+                    : undefined
+                }
+              />
+              <PlaneDateField localDate={plane?.localDate} />
+            </div>
           </>
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        {analysis.opportunities.some((o) => o.withinCorridor)
-          ? `Perigee is placed where the ${analysis.opportunities.find((o) => o.withinCorridor)!.branch === 'descending' ? 'southbound' : 'northbound'} ascent from Canso reaches orbit, so every window injects at ${Math.round(mission.perigee)} km.`
+        {allowed
+          ? `Perigee is placed where the ${headingWord(allowed.azimuth)} ascent from Canso reaches orbit, so every window injects at ${Math.round(mission.perigee)} km.`
           : 'No pass of this plane is reachable inside the over-ocean corridor.'}
       </p>
     </div>

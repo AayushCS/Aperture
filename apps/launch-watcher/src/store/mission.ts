@@ -1,14 +1,19 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
+  COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
   ORBIT_ALTITUDE,
+  clamp,
+  maxApogeeAltitude,
   shapeFromApsides,
   sunSynchronousInclinationFor,
   type OrbitFamily,
   type VehicleId,
   type WeatherRisk,
 } from '@aperture/orbital-core'
+
+import { clampSpanDays, clampStartDate, startDateOrToday } from '@/lib/searchRange'
 
 export type { OrbitFamily }
 
@@ -25,10 +30,6 @@ export interface MissionProfile {
   apogee: number
   /** deg — derived automatically for SSO */
   inclination: number
-  /** RAAN at the search start (deg) — LEO / polar */
-  raan: number
-  /** Local time of ascending node (h) — SSO */
-  ltan: number
   vehicleId: VehicleId
   /** Search start, YYYY-MM-DD (UTC). Empty = now */
   startDate: string
@@ -51,40 +52,56 @@ export function ssoInclination(perigee: number, apogee: number): number {
   return Number(sunSynchronousInclinationFor(semiMajorAxis, eccentricity).toFixed(4))
 }
 
-/** Starting point per family: circular at the family's default altitude (ORBIT_ALTITUDE); all reachable from Canso */
-const preset = (family: OrbitFamily, inclination: number) => {
+/**
+ * Inclination range and default for the families where it is chosen (SSO's is computed).
+ * LEO starts at Canso's latitude (45.3036°, shown as 45.3°): the lowest inclination
+ * a direct ascent reaches, flown due east.
+ */
+const CANSO_LATITUDE = COMMON_LAUNCH_SITES.SPACEPORT_NOVA_SCOTIA.latitude
+export const ORBIT_LIMITS: Record<Exclude<OrbitFamily, 'SSO'>, { minInc: number; maxInc: number; defaultInc: number }> = {
+  LEO: { minInc: CANSO_LATITUDE, maxInc: 60, defaultInc: CANSO_LATITUDE },
+  POLAR: { minInc: 87.9, maxInc: 90, defaultInc: 89 },
+}
+
+const SITE_TZ = COMMON_LAUNCH_SITES.SPACEPORT_NOVA_SCOTIA.timeZone
+
+/** Keep the search inside today … today + 16 days (site calendar): start clamped, then span */
+export function clampSearch(m: Pick<MissionProfile, 'startDate' | 'spanDays'>, now: Date = new Date()): Pick<MissionProfile, 'startDate' | 'spanDays'> {
+  const startDate = clampStartDate(m.startDate, now, SITE_TZ)
+  return { startDate, spanDays: clampSpanDays(startDate, m.spanDays, now, SITE_TZ) }
+}
+
+type OrbitShape = Pick<MissionProfile, 'perigee' | 'apogee' | 'inclination'>
+
+/** Clamp an orbit to its family's ranges: perigee, perigee ≤ apogee ≤ ceiling, inclination (computed for SSO) */
+export function normalizeOrbit(family: OrbitFamily, orbit: OrbitShape): OrbitShape {
+  const alt = ORBIT_ALTITUDE[family]
+  const finite = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback)
+  const perigee = clamp(finite(orbit.perigee, alt.defaultKm), alt.min, alt.max)
+  const apogee = clamp(finite(orbit.apogee, perigee), perigee, maxApogeeAltitude(family, perigee))
+  if (family === 'SSO') return { perigee, apogee, inclination: ssoInclination(perigee, apogee) }
+  const { minInc, maxInc, defaultInc } = ORBIT_LIMITS[family]
+  return { perigee, apogee, inclination: clamp(finite(orbit.inclination, defaultInc), minInc, maxInc) }
+}
+
+/** Starting point per family: circular at the default perigee */
+const preset = (family: OrbitFamily): OrbitShape => {
   const alt = ORBIT_ALTITUDE[family].defaultKm
-  return { perigee: alt, apogee: alt, inclination }
+  return normalizeOrbit(family, { perigee: alt, apogee: alt, inclination: family === 'SSO' ? Number.NaN : ORBIT_LIMITS[family].defaultInc })
 }
-export const ORBIT_PRESETS: Record<OrbitFamily, Pick<MissionProfile, 'perigee' | 'apogee' | 'inclination'>> = {
-  LEO: preset('LEO', 51.6),
-  POLAR: preset('POLAR', 90),
-  SSO: preset('SSO', ssoInclination(ORBIT_ALTITUDE.SSO.defaultKm, ORBIT_ALTITUDE.SSO.defaultKm)),
-}
-
-/** Keep perigee / apogee inside the family's allowed altitude range */
-export function clampAltitudes(family: OrbitFamily, perigee: number, apogee: number): { perigee: number; apogee: number } {
-  const { min, max } = ORBIT_ALTITUDE[family]
-  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : ORBIT_ALTITUDE[family].defaultKm))
-  const p = clamp(perigee)
-  return { perigee: p, apogee: Math.max(p, clamp(apogee)) }
-}
-
-export const ORBIT_LIMITS: Record<OrbitFamily, { minInc: number; maxInc: number }> = {
-  LEO: { minInc: 45.4, maxInc: 80 },
-  POLAR: { minInc: 80, maxInc: 100 },
-  SSO: { minInc: 95, maxInc: 105 },
+export const ORBIT_PRESETS: Record<OrbitFamily, OrbitShape> = {
+  LEO: preset('LEO'),
+  POLAR: preset('POLAR'),
+  SSO: preset('SSO'),
 }
 
 export const DEFAULT_MISSION: MissionProfile = {
   name: 'APERTURE-1',
   orbitType: 'SSO',
   ...ORBIT_PRESETS.SSO,
-  raan: 0,
-  ltan: 22.5,
   vehicleId: 'SPECTRUM',
-  // First orbital season at Spaceport Nova Scotia
-  startDate: '2027-12-01',
+  // Empty = today: the plane and search follow the clock (before operationalFrom the engine only warns)
+  startDate: '',
   spanDays: 14,
   daylightOnly: false,
   maxWeatherRisk: 'high',
@@ -121,10 +138,8 @@ export const useMissionStore = create<MissionState>()(
       update: (patch) =>
         set((s) => {
           const mission = { ...s.mission, ...patch }
-          Object.assign(mission, clampAltitudes(mission.orbitType, mission.perigee, mission.apogee))
-          // Keep SSO exactly sun-synchronous as the altitudes change
-          if (mission.orbitType === 'SSO') mission.inclination = ssoInclination(mission.perigee, mission.apogee)
-          return { mission, selectedWindowId: null }
+          // Clamp to the family's ranges (keeping SSO exactly sun-synchronous) and to the forecast-length search range
+          return { mission: { ...mission, ...normalizeOrbit(mission.orbitType, mission), ...clampSearch(mission) }, selectedWindowId: null }
         }),
       applyOrbitPreset: (type) => set((s) => ({ mission: { ...s.mission, orbitType: type, ...ORBIT_PRESETS[type] }, selectedWindowId: null })),
       setGlobe: (patch) => set((s) => ({ globe: { ...s.globe, ...patch } })),
@@ -146,12 +161,15 @@ export const useMissionStore = create<MissionState>()(
           m &&
           m.orbitType in ORBIT_PRESETS &&
           m.vehicleId in COMMON_VEHICLES &&
-          [m.perigee, m.apogee, m.inclination, m.raan, m.ltan].every((v) => typeof v === 'number' && Number.isFinite(v))
-        // Old saved altitudes may fall outside the per-orbit range: clamp them (and keep SSO sun-synchronous)
+          [m.perigee, m.apogee, m.inclination].every((v) => typeof v === 'number' && Number.isFinite(v))
+        // Keep only known fields (older saves carried an editable RAAN / LTAN, now fixed) and clamp to current ranges
         let mission = current.mission
         if (valid) {
-          mission = { ...DEFAULT_MISSION, ...m, ...clampAltitudes(m.orbitType, m.perigee, m.apogee) }
-          if (mission.orbitType === 'SSO') mission.inclination = ssoInclination(mission.perigee, mission.apogee)
+          const known = Object.fromEntries(Object.keys(DEFAULT_MISSION).map((k) => [k, m[k as keyof MissionProfile]]).filter(([, v]) => v !== undefined))
+          mission = { ...DEFAULT_MISSION, ...known }
+          // A saved date outside today … today + 16 goes back to today (not to the nearest limit)
+          if (mission.startDate && startDateOrToday(mission.startDate, new Date(), SITE_TZ) !== mission.startDate) mission.startDate = ''
+          mission = { ...mission, ...normalizeOrbit(mission.orbitType, mission), ...clampSearch(mission) }
         }
         return {
           ...current,

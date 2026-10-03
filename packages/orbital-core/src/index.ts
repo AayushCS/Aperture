@@ -4,12 +4,36 @@
 import { OrbitalEngine } from './calculations'
 import type { LaunchSite, OrbitFamily, VehicleParams } from './types'
 
-/** Default altitude and the "Advanced" slider range per orbit family (km) */
+/**
+ * Perigee range and default per orbit family, and the apogee ceiling (km).
+ * The apogee is at least the perigee (equal = circular) and at most `apogee.max`,
+ * or `perigee + apogee.abovePerigee` for SSO.
+ */
 export const ORBIT_ALTITUDE = {
-  LEO: { defaultKm: 500, min: 300, max: 1200 },
-  POLAR: { defaultKm: 700, min: 500, max: 1000 },
-  SSO: { defaultKm: 600, min: 500, max: 900 },
-} as const satisfies Record<OrbitFamily, { defaultKm: number; min: number; max: number }>
+  LEO: { defaultKm: 500, min: 300, max: 1000, apogee: { max: 2000 } },
+  POLAR: { defaultKm: 600, min: 400, max: 1000, apogee: { max: 2000 } },
+  SSO: { defaultKm: 690, min: 500, max: 800, apogee: { abovePerigee: 200 } },
+} as const satisfies Record<
+  OrbitFamily,
+  { defaultKm: number; min: number; max: number; apogee: { max: number } | { abovePerigee: number } }
+>
+
+/** Highest allowed apogee (km) for a family and perigee */
+export function maxApogeeAltitude(family: OrbitFamily, perigeeKm: number): number {
+  const { apogee } = ORBIT_ALTITUDE[family]
+  return 'max' in apogee ? apogee.max : perigeeKm + apogee.abovePerigee
+}
+
+/**
+ * How the target planes are chosen. LEO and polar: the plane is set so that, on the
+ * mission's start date, orbit insertion on the first allowed pass happens at this
+ * local time at the site (liftoff is one ascent earlier), then drifts with J2.
+ * SSO: the descending (southbound) node is crossed at a fixed mean local solar time.
+ */
+export const ORBIT_PLANE = {
+  insertionLocalTime: { LEO: '09:30', POLAR: '09:30' },
+  ssoDescendingNodeHours: 10,
+} as const
 
 export {
   OrbitalEngine,
@@ -22,6 +46,7 @@ export {
 } from './calculations'
 export * from './math'
 export * from './astro'
+export * from './localtime'
 export * from './elements'
 export * from './orbit'
 export * from './tle'
@@ -48,6 +73,7 @@ export const COMMON_LAUNCH_SITES = {
     azimuthCorridors: [[88, 200]],
     climate: 'north-atlantic-coastal',
     operationalFrom: new Date('2027-10-01T00:00:00Z'),
+    timeZone: 'America/Halifax',
   },
 } as const satisfies Record<string, LaunchSite>
 

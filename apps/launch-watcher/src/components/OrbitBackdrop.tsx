@@ -39,7 +39,7 @@ export default function OrbitBackdrop() {
       // Reference planes for each family, spread around the Earth, plus the mission orbit highlighted
       ...(['LEO', 'POLAR', 'SSO'] as const).flatMap((f, i) =>
         [0, 120, 240].map((raan, j) => ({
-          el: designMissionOrbit({ ...mission, orbitType: f, ...ORBIT_PRESETS[f], raan: raan + i * 40, ltan: 10 + j * 4 }, epoch),
+          el: designMissionOrbit({ ...mission, orbitType: f, ...ORBIT_PRESETS[f] }, epoch, raan + i * 40),
           color: FAMILY_COLORS[f],
           width: 0.8,
           phase: i * 97 + j * 53,

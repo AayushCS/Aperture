@@ -3,6 +3,7 @@ import type { ConjunctionScreen, LaunchWindow } from '@aperture/orbital-core'
 import type { ScreeningState } from '@/store/screening'
 import { RiskBadge } from '@/components/ui/Badge'
 import { fmt } from '@/lib/format'
+import { SITE } from '@/hooks/useMissionPlan'
 import { cn } from '@/utils/cn'
 
 export function LightingLabel({ window }: { window: LaunchWindow }) {
@@ -149,7 +150,10 @@ function WindowTime({ w, isBest }: { w: LaunchWindow; isBest: boolean }) {
           </span>
         )}
       </span>
-      <span className="block text-[11px] text-muted-foreground">{fmt.local(w.optimal)}</span>
+      <span className="tabular block text-[11px] text-muted-foreground" title={`Your time: ${fmt.local(w.optimal)}`}>
+        Liftoff {fmt.zonedTime(w.optimal, SITE.timeZone!)} → orbit {fmt.zonedTime(w.insertion.time, SITE.timeZone!)}{' '}
+        {fmt.zoneName(w.optimal, SITE.timeZone!)}
+      </span>
     </span>
   )
 }
