@@ -2,7 +2,14 @@
  * Aperture Orbital Core — launch window planning engine.
  */
 import { OrbitalEngine } from './calculations'
-import type { LaunchSite, VehicleParams } from './types'
+import type { LaunchSite, OrbitType, VehicleParams } from './types'
+
+/** Default altitude and the "Advanced" slider range per orbit family (km) */
+export const ORBIT_ALTITUDE = {
+  LEO: { defaultKm: 500, min: 300, max: 1200 },
+  POLAR: { defaultKm: 700, min: 500, max: 1000 },
+  SSO: { defaultKm: 600, min: 500, max: 900 },
+} as const satisfies Record<OrbitType, { defaultKm: number; min: number; max: number }>
 
 export { OrbitalEngine, nextWindow, corridorMargin, DEFAULT_LTAN, DEFAULT_RAAN_TOLERANCE, MAX_RANGE_DAYS } from './calculations'
 export * from './math'

@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowRight, Download, RotateCcw, Settings2, Sigma, Target } from 'lucide-react'
 import {
   COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
+  ORBIT_ALTITUDE,
   sunSynchronousInclination,
   type LaunchSiteId,
   type LaunchWindow,
@@ -75,6 +77,17 @@ export default function LaunchPlanner() {
   const ssoInc = sunSynchronousInclination(mission.altitude)
   const goCount = windows.filter((w) => w.weatherRisk === 'low').length
 
+  // Altitude: one sensible default per orbit family; bounded slider only under "Advanced"
+  const [advancedAlt, setAdvancedAlt] = useState(false)
+  const altRange = ORBIT_ALTITUDE[mission.orbitType]
+  const setAltitude = (altitude: number) =>
+    update(
+      mission.orbitType === 'SSO'
+        ? // SSO tilt depends on altitude, so keep it in sync
+          { altitude, inclination: Number(sunSynchronousInclination(altitude).toFixed(2)) }
+        : { altitude }
+    )
+
   return (
     <div className="space-y-6">
       <MissionHeading
@@ -110,7 +123,38 @@ export default function LaunchPlanner() {
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
-              <SliderField id="altitude" label="Altitude" unit="km" min={160} max={2000} step={10} value={mission.altitude} onChange={(altitude) => update({ altitude })} />
+              <div className="space-y-2">
+                {advancedAlt ? (
+                  <SliderField
+                    id="altitude"
+                    label="Altitude"
+                    unit="km"
+                    min={altRange.min}
+                    max={altRange.max}
+                    step={10}
+                    value={mission.altitude}
+                    onChange={setAltitude}
+                    hint={`Default for ${mission.orbitType}: ${altRange.defaultKm} km`}
+                  />
+                ) : (
+                  <div>
+                    <span className="text-xs font-medium text-muted-foreground">Altitude</span>
+                    <p className="text-sm">
+                      {mission.altitude} km <span className="text-xs text-muted-foreground">(default)</span>
+                    </p>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="text-xs text-primary underline-offset-2 hover:underline"
+                  onClick={() => {
+                    if (advancedAlt) setAltitude(altRange.defaultKm)
+                    setAdvancedAlt((v) => !v)
+                  }}
+                >
+                  {advancedAlt ? 'Reset to default' : 'Advanced: change altitude'}
+                </button>
+              </div>
               <SliderField
                 id="inclination"
                 label="Inclination"
