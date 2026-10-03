@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { geoCircle, geoGraticule10, geoOrthographic, geoPath, type GeoPermissibleObjects } from 'd3-geo'
 import { Crosshair, Expand, Layers, Minus, Pause, Play, Plus, RotateCcw, Shrink } from 'lucide-react'
 import {
   EARTH_RADIUS_KM,
   anomalisticPeriod,
   gmst,
-  groundTrack,
   orbitRing,
   propagate,
   visibilityRadius,
   type LaunchSite,
   type LaunchWindow,
+  type OrbitalElements,
 } from '@aperture/orbital-core'
-import { LAND_110M, nightBands, trackToMultiLine } from '@/lib/geo'
+import { LAND_110M, nightBands } from '@/lib/geo'
 import { useMissionStore, type GlobeLayer } from '@/store/mission'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Form'
@@ -36,7 +36,6 @@ const VIEWS = [
 
 const LAYERS: ReadonlyArray<{ id: GlobeLayer; label: string }> = [
   { id: 'ring', label: '3D orbit' },
-  { id: 'track', label: 'Ground track' },
   { id: 'ascent', label: 'Ascent' },
   { id: 'footprint', label: 'Coverage' },
   { id: 'terminator', label: 'Day / night' },
@@ -74,6 +73,36 @@ function project3d(cam: Camera, lat: number, lon: number, rho: number, scale: nu
   return { x: cx + scale * rho * X, y: cy - scale * rho * Y, hidden, front: Z >= 0 }
 }
 
+type V3 = [number, number, number]
+const unit = (v: V3): V3 => {
+  const m = Math.hypot(v[0], v[1], v[2])
+  return [v[0] / m, v[1] / m, v[2] / m]
+}
+const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+/** How far the Space-view camera sits from the orbit plane's pole (deg). 0 = face-on circle, 90 = edge-on line. */
+const SPACE_VIEW_TILT = 40
+
+/**
+ * Initial Space-view camera direction (right ascension / declination, deg).
+ * The orbit passes through the launch site, so aiming at the site looks along the plane and flattens
+ * the ring to a line. Instead, look from SPACE_VIEW_TILT° off the plane's pole, tilted toward the
+ * insertion point so it stays on screen.
+ */
+function spaceViewFor(orbit: OrbitalElements, at: Date): { ra: number; dec: number } {
+  const a = propagate(orbit, at).eci
+  const b = propagate(orbit, new Date(at.getTime() + 60_000)).eci
+  const p: V3 = [a.x, a.y, a.z]
+  const s = unit(p) // toward the insertion point
+  const n = unit(cross(p, [b.x, b.y, b.z])) // orbit-plane pole
+  const t = SPACE_VIEW_TILT * D
+  const aim = (sign: number) => unit([0, 1, 2].map((k) => sign * Math.cos(t) * n[k]! + Math.sin(t) * s[k]!) as V3)
+  const up = aim(1)
+  const down = aim(-1)
+  const c = up[2] >= down[2] ? up : down // prefer a northern-hemisphere view
+  return { ra: Math.atan2(c[1], c[0]) / D, dec: Math.max(-85, Math.min(85, Math.asin(c[2]) / D)) }
+}
+
 interface OrbitGlobeProps {
   site: LaunchSite
   window: LaunchWindow
@@ -84,7 +113,7 @@ interface OrbitGlobeProps {
 /**
  * Interactive orthographic globe: drag to rotate, wheel / buttons to zoom,
  * click satellites or the site to inspect them. Shows the single mission orbit
- * as a 3D ellipse around the Earth and its ground track for N revolutions.
+ * as a 3D ellipse around the Earth, with the satellite flying it continuously.
  */
 export default function OrbitGlobe({ site, window: w, name = 'Mission', color = '#a78bfa' }: OrbitGlobeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -94,7 +123,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
   const setGlobe = useMissionStore((s) => s.setGlobe)
   const toggleLayer = useMissionStore((s) => s.toggleLayer)
   const inspect = useMissionStore((s) => s.inspect)
-  const { layers, revolutions } = settings
+  const { layers } = settings
   const speed = String(settings.speed) as (typeof SPEEDS)[number]['value']
 
   const [playing, setPlaying] = useState(() => !reducedMotion())
@@ -112,29 +141,17 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
 
   const orbit = w.orbit
   const periodSec = anomalisticPeriod(orbit)
-  const totalSec = periodSec * revolutions
   const apogeeRho = (orbit.semiMajorAxis * (1 + orbit.eccentricity)) / EARTH_RADIUS_KM
-
-  const step = Math.max(15, Math.round(periodSec / 360))
-  const revTracks = useMemo(() => {
-    const track = groundTrack(orbit, w.insertion.time, totalSec, step)
-    const perRev = Math.round(periodSec / step)
-    return Array.from({ length: revolutions }, (_, k) => trackToMultiLine(track.slice(k * perRev, (k + 1) * perRev + 1)))
-  }, [orbit, w.insertion.time, totalSec, step, periodSec, revolutions])
-  const groundAscent = useMemo(
-    () => ({ type: 'LineString' as const, coordinates: w.trajectory.map((p) => [p.longitude, p.latitude]) }),
-    [w]
-  )
 
   useEffect(() => {
     elapsedRef.current = 0
     setElapsed(0)
-  }, [w.id, revolutions])
+  }, [w.id])
 
-  // Space view starts looking at Canso at the moment of insertion
+  // Space view starts oblique to the orbit plane (see spaceViewFor)
   useEffect(() => {
-    spaceRef.current = { ra: site.longitude + gmst(w.insertion.time), dec: site.latitude * 0.6 }
-  }, [w.id, w.insertion.time, site])
+    spaceRef.current = spaceViewFor(orbit, w.insertion.time)
+  }, [w.id, w.insertion.time, orbit])
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -236,18 +253,6 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
     stroke(LAND_110M, 'rgba(125,160,210,0.35)', 0.5)
     if (layers.terminator) for (const band of nightBands(simTime)) fill(band, 'rgba(0,3,10,0.3)')
 
-    // Ground track: revolution 1 bright, later revolutions fade
-    if (layers.track) {
-      revTracks.forEach((t, k) => {
-        const alpha = k === 0 ? 0.9 : Math.max(0.18, 0.55 - k * 0.08)
-        stroke(t, `rgba(167,139,250,${alpha})`, k === 0 ? 1.6 : 1, [4, 3])
-      })
-    }
-
-    if (layers.ascent) {
-      stroke(groundAscent, 'rgba(56,189,248,0.35)', 1.5, [2, 3])
-    }
-
     if (layers.footprint) {
       const deg = (visibilityRadius(sat.altitude, 10) / 6371) * (180 / Math.PI)
       fill(geoCircle().center([sat.longitude, sat.latitude]).radius(deg)(), 'rgba(56,189,248,0.12)')
@@ -336,9 +341,9 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
     }
 
     hitsRef.current = hits
-  }, [w, orbit, view, layers, apogeeRho, revTracks, groundAscent, site, name, color])
+  }, [w, orbit, view, layers, apogeeRho, site, name, color])
 
-  // Animation clock
+  // Animation clock: runs continuously, no looping
   useEffect(() => {
     if (!playing) return
     let raf = 0
@@ -347,7 +352,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
     const tick = (now: number) => {
       const dt = (now - last) / 1000
       last = now
-      elapsedRef.current = (elapsedRef.current + dt * Number(speed)) % totalSec
+      elapsedRef.current += dt * Number(speed)
       if (now - lastUi > 100) {
         setElapsed(elapsedRef.current)
         lastUi = now
@@ -357,7 +362,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing, speed, totalSec, draw])
+  }, [playing, speed, draw])
 
   // Redraw when paused or resized
   useEffect(() => {
@@ -432,7 +437,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
             tabIndex={0}
             className={cn('h-full w-full touch-none outline-none', hover ? 'cursor-pointer' : dragRef.current ? 'cursor-grabbing' : 'cursor-grab')}
             role="img"
-            aria-label={`Interactive globe: ${name} orbit ${Math.round(sat.altitude)} km altitude, ${revolutions} revolution${revolutions > 1 ? 's' : ''} of ground track from ${site.name}. Drag or use arrow keys to rotate, plus and minus to zoom.`}
+            aria-label={`Interactive globe: ${name} orbit at ${Math.round(sat.altitude)} km altitude, simulated continuously from ${site.name}. Drag or use arrow keys to rotate, plus and minus to zoom.`}
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId)
               dragRef.current = { ...local(e), moved: 0 }
@@ -514,18 +519,6 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
                     <input type="checkbox" className="size-3.5 accent-[hsl(var(--primary))]" checked={layers[l.id]} onChange={() => toggleLayer(l.id)} />
                   </label>
                 ))}
-                <div className="flex items-center justify-between border-t border-white/5 px-2 pt-2 text-xs">
-                  <span>Revolutions</span>
-                  <span className="flex items-center gap-1">
-                    <button type="button" className="rounded p-1 hover:bg-white/10" aria-label="Fewer revolutions" onClick={() => setGlobe({ revolutions: Math.max(1, revolutions - 1) })}>
-                      <Minus className="size-3" />
-                    </button>
-                    <span className="tabular w-5 text-center font-semibold">{revolutions}</span>
-                    <button type="button" className="rounded p-1 hover:bg-white/10" aria-label="More revolutions" onClick={() => setGlobe({ revolutions: Math.min(16, revolutions + 1) })}>
-                      <Plus className="size-3" />
-                    </button>
-                  </span>
-                </div>
               </div>
             )}
           </div>
@@ -539,7 +532,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
               label: 'Reset view',
               fn: () => {
                 camRef.current.zoom = 1
-                spaceRef.current = { ra: site.longitude + gmst(w.insertion.time), dec: site.latitude * 0.6 }
+                spaceRef.current = spaceViewFor(orbit, w.insertion.time)
                 setView('space')
                 draw()
               },
@@ -562,7 +555,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
       <dl className="tabular grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
         {[
           ['Since insertion', fmt.duration(elapsed)],
-          ['Revolution', `Rev ${revNo} / ${revolutions}`],
+          ['Revolution', `Rev ${revNo}`],
           ['Altitude', fmt.km(sat.altitude)],
           ['Speed', `${sat.speed.toFixed(2)} km/s`],
           ['Sub-satellite', `${fmt.lat(sat.latitude)} ${fmt.lon(sat.longitude)}`],
@@ -579,7 +572,6 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
         <li className="flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-full bg-go" /> Launch site</li>
         <li className="flex items-center gap-1.5"><span aria-hidden className="h-0.5 w-4 bg-sky-400" /> Ascent</li>
         <li className="flex items-center gap-1.5"><span aria-hidden className="h-0.5 w-4" style={{ backgroundColor: color }} /> Orbit (one ellipse, fixed in space)</li>
-        <li className="flex items-center gap-1.5"><span aria-hidden className="h-0 w-4 border-t border-dashed border-violet-400" /> Ground track (Earth turns under it — later revs fade)</li>
         <li className="flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-full bg-sky-400/30" /> Coverage (10° elev.)</li>
       </ul>
     </div>
