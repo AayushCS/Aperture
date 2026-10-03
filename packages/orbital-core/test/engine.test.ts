@@ -15,12 +15,18 @@ import {
   groundTrackFromPoint,
   keplerianToCartesian,
   localSolarTime,
+  meanSunRightAscension,
   nextWindow,
   nodalPrecession,
   normalizeAngle,
+  orbitTraffic,
+  prepareScreeningObjects,
+  screenWindow,
   orbitalPeriod,
+  parseGpRecord,
   planeGeometry,
   radToDeg,
+  semiMajorAxisFromMeanMotion,
   solveKepler,
   sunElevation,
   sunPosition,
@@ -146,6 +152,16 @@ describe('launch windows', () => {
     const times = windows.map((w) => localSolarTime(w.optimal, SITES.VANDENBERG.longitude))
     for (const t of times) expect(Math.abs(t - times[0]!)).toBeLessThan(0.1)
     for (const w of windows) expect(w.azimuth).toBeGreaterThan(180)
+  })
+
+  test('SSO RAAN is offset from the mean Sun by the LTAN hour angle', () => {
+    const windows = engine.calculateLaunchWindows(
+      input({ orbit: { type: 'SSO', altitude: 550, inclination: sunSynchronousInclination(550), ltan: 22.5 }, launchSite: SITES.VANDENBERG })
+    )
+    expect(windows.length).toBeGreaterThan(0)
+    for (const w of windows) {
+      expect(normalizeAngle(w.raan - meanSunRightAscension(w.insertion.time))).toBeCloseTo((22.5 - 12) * 15, 1)
+    }
   })
 
   test('SSO from KSC is rejected by the range-safety corridor', () => {
@@ -316,5 +332,104 @@ describe('input validation', () => {
 
   test('schema accepts a valid mission', () => {
     expect(CalculationInputSchema.safeParse(ISS).success).toBe(true)
+  })
+})
+
+describe('orbit traffic', () => {
+  const gp = (id: number, revPerDay: number, ecc: number, inc: number) => ({
+    OBJECT_NAME: `OBJ ${id}`,
+    NORAD_CAT_ID: id,
+    EPOCH: '2026-10-01T12:00:00.000000',
+    MEAN_MOTION: revPerDay,
+    ECCENTRICITY: ecc,
+    INCLINATION: inc,
+  })
+  // Mean motion (rev/day) of a circular orbit at an altitude
+  const rev = (alt: number) => 86_400 / orbitalPeriod(alt)
+
+  test('mean motion converts back to the circular-orbit radius', () => {
+    expect(semiMajorAxisFromMeanMotion(rev(420)) - 6378.137).toBeCloseTo(420, 6)
+  })
+
+  test('parses GP records as UTC and rejects malformed ones', () => {
+    const o = parseGpRecord(gp(1, rev(500), 0.01, 51.6))!
+    expect(o.epoch.toISOString()).toBe('2026-10-01T12:00:00.000Z')
+    expect(o.perigee).toBeLessThan(500)
+    expect(o.apogee).toBeGreaterThan(500)
+    expect(parseGpRecord({ ...gp(2, rev(500), 0, 51.6), MEAN_MOTION: '15.1' })).toBeNull()
+    expect(parseGpRecord({ ...gp(3, rev(500), 1.2, 51.6) })).toBeNull()
+    expect(parseGpRecord(null)).toBeNull()
+  })
+
+  test('counts shell and inclination overlaps and ranks by altitude', () => {
+    const objects = [
+      gp(10, rev(420), 0, 51.6), // in shell
+      gp(11, rev(440), 0, 52.5), // in shell, edge of inclination band
+      gp(12, rev(450), 0, 51.6), // 30 km above: outside ±25
+      gp(13, rev(420), 0, 53.7), // inclination 2.06° off
+      gp(14, rev(800), 0.05, 51.6), // eccentric: perigee dips into the shell
+      gp(15, rev(410), 0, 51.0),
+    ].map((r) => parseGpRecord(r)!)
+    const perigee14 = objects[4]!.perigee
+    expect(perigee14).toBeLessThan(445)
+
+    const t = orbitTraffic(objects, { altitude: 420, inclination: 51.64 })
+    expect(t.total).toBe(6)
+    expect(t.matches).toBe(4)
+    expect(t.closest.map((o) => o.noradId)).toEqual([10, 15, 11, 14])
+    expect(t.medianEpoch?.toISOString()).toBe('2026-10-01T12:00:00.000Z')
+    expect(orbitTraffic(objects, { altitude: 420, inclination: 51.64 }, { limit: 2 }).closest).toHaveLength(2)
+  })
+})
+
+describe('conjunction screen', () => {
+  const insertion = new Date('2026-10-05T12:00:00Z')
+  const orbit = { altitude: 500, inclination: 51.6 }
+  const window = { raan: 40, branch: 'ascending' as const, insertion: { time: insertion, latitude: 0 } }
+  // Circular object in the payload's plane at insertion, `phase` degrees ahead along-track
+  const omm = (name: string, id: number, phase: number, altitude = orbit.altitude) => ({
+    OBJECT_NAME: name,
+    OBJECT_ID: `2026-001${String.fromCharCode(64 + (id % 26) + 1)}`,
+    EPOCH: insertion.toISOString().replace('Z', ''),
+    MEAN_MOTION: 86_400 / orbitalPeriod(altitude),
+    ECCENTRICITY: 0.0001,
+    INCLINATION: orbit.inclination,
+    RA_OF_ASC_NODE: window.raan,
+    ARG_OF_PERICENTER: 0,
+    MEAN_ANOMALY: phase,
+    EPHEMERIS_TYPE: 0,
+    CLASSIFICATION_TYPE: 'U',
+    NORAD_CAT_ID: id,
+    ELEMENT_SET_NO: 999,
+    REV_AT_EPOCH: 1,
+    BSTAR: 0,
+    MEAN_MOTION_DOT: 0,
+    MEAN_MOTION_DDOT: 0,
+  })
+
+  test('pre-filters to objects within ±50 km of the target altitude', () => {
+    const objects = prepareScreeningObjects([omm('NEAR', 1, 90, 540), omm('FAR', 2, 90, 600), { junk: true }], orbit.altitude)
+    expect(objects.map((o) => o.name)).toEqual(['NEAR'])
+  })
+
+  test('blocks a window when an object passes within 25 km', () => {
+    const result = screenWindow(prepareScreeningObjects([omm('SAT A', 1, 0), omm('SAT B', 2, 180)], orbit.altitude), orbit, window)
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toMatch(/^collision risk: \d+\.\d km from SAT A$/)
+    expect(result.closest!.distanceKm).toBeLessThan(25)
+  })
+
+  test('uses the 200 km limit for ISS and Tiangong (CSS) modules only', () => {
+    // ~1° ahead along-track ≈ 120 km
+    const station = screenWindow(prepareScreeningObjects([omm('CSS (TIANHE)', 3, 1)], orbit.altitude), orbit, window)
+    expect(station.blocked).toBe(true)
+    expect(station.reason).toContain('CSS (TIANHE)')
+    expect(station.closest!.thresholdKm).toBe(200)
+
+    const other = screenWindow(prepareScreeningObjects([omm('ISS OBJECT YM', 4, 180)], orbit.altitude), orbit, window)
+    expect(other.blocked).toBe(false)
+    expect(other.reason).toBeUndefined()
+    expect(other.closest!.thresholdKm).toBe(25)
+    expect(other.closest!.distanceKm).toBeGreaterThan(1000)
   })
 })

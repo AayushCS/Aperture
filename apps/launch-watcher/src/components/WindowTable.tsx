@@ -1,5 +1,6 @@
 import { Moon, Sun, Sunrise, Sparkles } from 'lucide-react'
-import type { LaunchWindow } from '@aperture/orbital-core'
+import type { ConjunctionScreen, LaunchWindow } from '@aperture/orbital-core'
+import type { ScreeningState } from '@/store/screening'
 import { RiskBadge } from '@/components/ui/Badge'
 import { fmt } from '@/lib/format'
 import { cn } from '@/utils/cn'
@@ -27,21 +28,45 @@ export function ScoreBar({ value }: { value: number }) {
   )
 }
 
+/** Post-insertion conjunction screen result for one window */
+export function ScreenLabel({ screen, status }: { screen?: ConjunctionScreen; status: ScreeningState['status'] }) {
+  if (screen?.blocked) {
+    return (
+      <span className="block" title={screen.reason}>
+        <span className="rounded-full bg-nogo/10 px-2 py-0.5 text-[11px] font-semibold text-nogo ring-1 ring-inset ring-nogo/30">Blocked</span>
+        <span className="tabular mt-0.5 block max-w-[11rem] truncate text-[11px] text-muted-foreground">
+          {screen.closest!.distanceKm.toFixed(1)} km · {screen.closest!.name}
+        </span>
+      </span>
+    )
+  }
+  if (screen) {
+    return (
+      <span className="block" title={screen.closest ? `Closest approach ${screen.closest.distanceKm.toFixed(1)} km from ${screen.closest.name}` : undefined}>
+        <span className="text-xs font-semibold text-go">Clear</span>
+        {screen.closest && <span className="tabular block text-[11px] text-muted-foreground">≥ {screen.closest.distanceKm.toFixed(0)} km</span>}
+      </span>
+    )
+  }
+  return <span className="text-xs text-muted-foreground">{status === 'running' ? 'Screening…' : '—'}</span>
+}
+
 interface WindowTableProps {
   windows: readonly LaunchWindow[]
   selectedId?: string
   onSelect?: (id: string) => void
   limit?: number
   caption: string
+  screening?: ScreeningState
 }
 
-export default function WindowTable({ windows, selectedId, onSelect, limit, caption }: WindowTableProps) {
+export default function WindowTable({ windows, selectedId, onSelect, limit, caption, screening }: WindowTableProps) {
   const rows = limit ? windows.slice(0, limit) : windows
   const best = windows.reduce<LaunchWindow | undefined>((b, w) => (!b || w.quality > b.quality ? w : b), undefined)
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] text-sm">
+      <table className="w-full min-w-[840px] text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr className="border-b text-left text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -50,6 +75,7 @@ export default function WindowTable({ windows, selectedId, onSelect, limit, capt
             <th scope="col" className="px-3 py-2 font-medium">Azimuth</th>
             <th scope="col" className="px-3 py-2 font-medium">Lighting</th>
             <th scope="col" className="px-3 py-2 font-medium">Weather</th>
+            {screening && <th scope="col" className="px-3 py-2 font-medium">Conjunction</th>}
             <th scope="col" className="py-2 pl-3 pr-5 font-medium">Score</th>
           </tr>
         </thead>
@@ -95,6 +121,11 @@ export default function WindowTable({ windows, selectedId, onSelect, limit, capt
                 <td className="px-3 py-2.5">
                   <RiskBadge risk={w.weatherRisk} />
                 </td>
+                {screening && (
+                  <td className="px-3 py-2.5">
+                    <ScreenLabel screen={screening.results[w.id]} status={screening.status} />
+                  </td>
+                )}
                 <td className="py-2.5 pl-3 pr-5">
                   <ScoreBar value={w.quality} />
                 </td>

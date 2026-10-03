@@ -10,6 +10,8 @@ export * from './astro'
 export * from './orbit'
 export * from './trajectory'
 export * from './weather'
+export * from './traffic'
+export * from './conjunction'
 export * from './constants'
 export * from './types'
 

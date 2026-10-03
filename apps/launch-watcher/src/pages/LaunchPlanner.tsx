@@ -5,6 +5,7 @@ import {
   COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
   sunSynchronousInclination,
+  type ConjunctionScreen,
   type LaunchSiteId,
   type LaunchWindow,
   type OrbitType,
@@ -15,8 +16,10 @@ import { useMissionPlan } from '@/hooks/useMissionPlan'
 import { useMissionStore } from '@/store/mission'
 import MissionHeading from '@/components/MissionHeading'
 import IssueList from '@/components/IssueList'
+import OrbitTrafficPanel from '@/components/OrbitTrafficPanel'
 import WeatherPanel from '@/components/WeatherPanel'
-import WindowTable, { LightingLabel, ScoreBar } from '@/components/WindowTable'
+import WindowTable, { LightingLabel, ScoreBar, ScreenLabel } from '@/components/WindowTable'
+import type { ScreeningState } from '@/store/screening'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { RiskBadge, Stat } from '@/components/ui/Badge'
 import { Button, buttonVariants } from '@/components/ui/Button'
@@ -43,8 +46,8 @@ const RISK_OPTIONS: ReadonlyArray<{ value: WeatherRisk; label: string }> = [
 
 const SPAN_OPTIONS = [3, 7, 14, 30, 60]
 
-function exportCsv(windows: readonly LaunchWindow[], name: string) {
-  const header = ['window_open_utc', 't0_utc', 'window_close_utc', 'duration_s', 'azimuth_deg', 'branch', 'lighting', 'weather_risk', 'weather_violation_prob', 'weather_source', 'score']
+function exportCsv(windows: readonly LaunchWindow[], name: string, screens: Record<string, ConjunctionScreen>) {
+  const header = ['window_open_utc', 't0_utc', 'window_close_utc', 'duration_s', 'azimuth_deg', 'branch', 'lighting', 'weather_risk', 'weather_violation_prob', 'weather_source', 'score', 'conjunction_screen']
   const rows = windows.map((w) => [
     w.start.toISOString(),
     w.optimal.toISOString(),
@@ -57,6 +60,8 @@ function exportCsv(windows: readonly LaunchWindow[], name: string) {
     w.weather.violationProbability,
     w.weather.source,
     w.quality,
+    // Quoted: object names are free text
+    `"${(screens[w.id] ? (screens[w.id]!.reason ?? 'clear') : 'not screened').replace(/"/g, '""')}"`,
   ])
   const csv = [header, ...rows].map((r) => r.join(',')).join('\n')
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -70,7 +75,7 @@ function exportCsv(windows: readonly LaunchWindow[], name: string) {
 
 export default function LaunchPlanner() {
   const plan = useMissionPlan()
-  const { mission, analysis, windows, focus, site, vehicle } = plan
+  const { mission, analysis, windows, focus, site, vehicle, screening } = plan
   const { update, applyOrbitPreset, selectWindow, reset, selectedWindowId } = useMissionStore()
   const ssoInc = sunSynchronousInclination(mission.altitude)
   const goCount = windows.filter((w) => w.weatherRisk === 'low').length
@@ -260,7 +265,9 @@ export default function LaunchPlanner() {
             </CardBody>
           </Card>
 
-          {focus && <WindowDetail window={focus} selected={focus.id === selectedWindowId} />}
+          <OrbitTrafficPanel altitude={mission.altitude} inclination={mission.inclination} screening={screening} />
+
+          {focus && <WindowDetail window={focus} selected={focus.id === selectedWindowId} screen={screening.results[focus.id]} screeningStatus={screening.status} />}
         </div>
       </div>
 
@@ -275,14 +282,14 @@ export default function LaunchPlanner() {
               : 'No windows match the current profile and constraints'
           }
           action={
-            <Button variant="outline" size="sm" disabled={!windows.length} onClick={() => exportCsv(windows, mission.name)}>
+            <Button variant="outline" size="sm" disabled={!windows.length} onClick={() => exportCsv(windows, mission.name, screening.results)}>
               <Download aria-hidden /> Export CSV
             </Button>
           }
         />
         <div className="mt-3 max-h-[560px] overflow-y-auto">
           {windows.length > 0 ? (
-            <WindowTable windows={windows} selectedId={focus?.id} onSelect={selectWindow} caption="Calculated launch windows" />
+            <WindowTable windows={windows} selectedId={focus?.id} onSelect={selectWindow} caption="Calculated launch windows" screening={screening} />
           ) : (
             <p className="px-5 pb-5 text-sm text-muted-foreground">Try relaxing the weather or daylight constraints, widening the span, or resolving the issues above.</p>
           )}
@@ -292,7 +299,17 @@ export default function LaunchPlanner() {
   )
 }
 
-function WindowDetail({ window: w, selected }: { window: LaunchWindow; selected: boolean }) {
+function WindowDetail({
+  window: w,
+  selected,
+  screen,
+  screeningStatus,
+}: {
+  window: LaunchWindow
+  selected: boolean
+  screen?: ConjunctionScreen
+  screeningStatus: ScreeningState['status']
+}) {
   const b = w.scoreBreakdown
   return (
     <Card>
@@ -309,6 +326,16 @@ function WindowDetail({ window: w, selected }: { window: LaunchWindow; selected:
           <Stat label="Lighting" value={<LightingLabel window={w} />} hint={`Sun ${fmt.deg(w.lighting.sunElevation)} at pad`} />
           <Stat label="Insertion" value={fmt.utcTime(w.insertion.time)} hint={`${fmt.lat(w.insertion.latitude)} ${fmt.lon(w.insertion.longitude)}`} />
           <Stat label="RAAN" value={fmt.deg(w.raan, 2)} hint="At insertion" />
+          <Stat
+            className="col-span-2"
+            label="Conjunction screen"
+            value={<ScreenLabel screen={screen} status={screeningStatus} />}
+            hint={
+              screen?.closest
+                ? `${screen.blocked ? screen.reason : `Closest ${screen.closest.distanceKm.toFixed(1)} km from ${screen.closest.name}`} at ${fmt.utcTime(screen.closest.time)}`
+                : '3 h after insertion · 25 km (200 km ISS/Tiangong)'
+            }
+          />
         </dl>
 
         <div className="space-y-2">

@@ -44,6 +44,15 @@ export function sunPosition(date: Date): SunPosition {
   }
 }
 
+/**
+ * Right ascension of the fictitious mean Sun (deg) — moves uniformly along the
+ * equator, so it is the reference for mean solar time (and therefore LTAN).
+ */
+export function meanSunRightAscension(date: Date): number {
+  const n = julianDate(date) - J2000
+  return normalizeAngle(280.46 + 0.9856474 * n)
+}
+
 /** Geometric elevation of the Sun's centre above the horizon (deg) for an observer */
 export function sunElevation(date: Date, latitude: number, longitude: number): number {
   const { rightAscension, declination } = sunPosition(date)

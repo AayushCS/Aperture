@@ -8,7 +8,7 @@
  * scores each opportunity.
  */
 import { EARTH_ROTATION_RAD_S, MS_PER_DAY, SUN_RATE_DEG_DAY } from './constants'
-import { sunPosition } from './astro'
+import { meanSunRightAscension } from './astro'
 import { clamp, normalizeAngle, radToDeg } from './math'
 import {
   circularVelocity,
@@ -188,7 +188,7 @@ export class OrbitalEngine {
     if (orbit.type === 'SSO') {
       const ltan = orbit.ltan ?? DEFAULT_LTAN
       return {
-        at: (t) => normalizeAngle(sunPosition(t).rightAscension + (ltan - 12) * 15),
+        at: (t) => normalizeAngle(meanSunRightAscension(t) + (ltan - 12) * 15),
         rate: SUN_RATE_DEG_DAY,
       }
     }

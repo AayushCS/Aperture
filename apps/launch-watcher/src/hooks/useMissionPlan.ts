@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
   COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
@@ -11,6 +11,7 @@ import {
   type VehicleParams,
 } from '@aperture/orbital-core'
 import { useMissionStore, type MissionProfile } from '@/store/mission'
+import { requestScreening, useScreeningStore, type ScreeningState } from '@/store/screening'
 import { useForecast } from './useForecast'
 
 export interface MissionPlan {
@@ -25,6 +26,8 @@ export interface MissionPlan {
   /** Selected window, falling back to the next one */
   focus: LaunchWindow | undefined
   forecast: { status: 'loading' | 'live' | 'unavailable'; updatedAt?: Date }
+  /** Post-insertion conjunction screen, filled in progressively by a background worker */
+  screening: ScreeningState
 }
 
 function startOfSearch(startDate: string): Date {
@@ -70,6 +73,11 @@ export function useMissionPlan(): MissionPlan {
     return { input, analysis, windows }
   }, [mission, forecastQuery.data])
 
+  const screening = useScreeningStore()
+  useEffect(() => {
+    requestScreening({ altitude: mission.altitude, inclination: mission.inclination }, computed.windows)
+  }, [mission.altitude, mission.inclination, computed.windows])
+
   const next = nextWindow(computed.windows)
   const focus = computed.windows.find((w) => w.id === selectedId) ?? next
 
@@ -84,5 +92,6 @@ export function useMissionPlan(): MissionPlan {
       status: forecastQuery.isPending ? 'loading' : forecastQuery.data?.length ? 'live' : 'unavailable',
       updatedAt: forecastQuery.dataUpdatedAt ? new Date(forecastQuery.dataUpdatedAt) : undefined,
     },
+    screening,
   }
 }
