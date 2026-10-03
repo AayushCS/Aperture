@@ -3,10 +3,9 @@ import { ArrowRight, Compass, Eye, FileCode2, MapPinned, Orbit, Radar, Rocket, S
 import { formatTle, type LaunchWindow } from '@aperture/orbital-core'
 import { useMissionPlan, type MissionPlan } from '@/hooks/useMissionPlan'
 import EllipseDiagram from '@/components/EllipseDiagram'
-import CatalogList from '@/components/CatalogList'
+import { FamilyPicker } from '@/components/OrbitForm'
 import { SiteCard } from '@/components/SiteWidget'
-import { CLASS_COLOR } from '@/data/catalog'
-import { CLASS_LABEL, ageLabel, hhmm } from '@/lib/orbitStats'
+import { CLASS_COLOR, CLASS_LABEL, hhmm } from '@/lib/orbitStats'
 import MissionHeading from '@/components/MissionHeading'
 import CountdownTimer from '@/components/CountdownTimer'
 import WeatherPanel from '@/components/WeatherPanel'
@@ -85,17 +84,17 @@ export default function Dashboard() {
             <SiteCard opportunities={analysis.opportunities} className="h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-700" />
             <Card className="animate-in fade-in-0 slide-in-from-bottom-2 duration-1000">
               <CardHeader
-                icon={<Satellite />}
-                title="Canadian satellites"
-                description="Click one to inspect its TLE"
+                icon={<Orbit />}
+                title="Orbit type"
+                description="Switch family — windows and TLE update instantly"
                 action={
-                  <Link to="/orbit" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
-                    Globe <ArrowRight aria-hidden />
+                  <Link to="/planner" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
+                    Tune <ArrowRight aria-hidden />
                   </Link>
                 }
               />
-              <CardBody className="pt-3">
-                <CatalogList limit={5} />
+              <CardBody className="pt-4">
+                <FamilyPicker className="grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3" />
               </CardBody>
             </Card>
           </div>
@@ -188,10 +187,9 @@ function ViewingGuide({ window: w }: { window: LaunchWindow }) {
 /** Clickable mission-orbit widget: TLE at a glance, orbit shape, opens the inspector */
 function MissionOrbitWidget({ plan }: { plan: MissionPlan }) {
   const inspect = useMissionStore((s) => s.inspect)
-  const { analysis, orbit, tle } = plan
+  const { analysis, orbit, tle, mission } = plan
   const color = CLASS_COLOR[analysis.orbitClass]
   const [l1, l2] = formatTle(tle)
-  const age = (Date.now() - orbit.epoch.getTime()) / 86_400_000
   return (
     <button
       type="button"
@@ -205,7 +203,7 @@ function MissionOrbitWidget({ plan }: { plan: MissionPlan }) {
           <Orbit className="size-3.5" aria-hidden /> Mission orbit
         </div>
         <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ color, backgroundColor: `${color}22` }}>
-          {analysis.orbitClass}
+          {mission.orbitType}
         </span>
       </div>
       <div className="mt-2 flex items-center gap-4">
@@ -221,7 +219,7 @@ function MissionOrbitWidget({ plan }: { plan: MissionPlan }) {
             {CLASS_LABEL[analysis.orbitClass]}
             {analysis.sunSynchronous && ` · ${hhmm(analysis.ltan + 12)} descending`}
           </div>
-          <div className="text-[11px] text-muted-foreground">TLE {ageLabel(age)}</div>
+          <div className="text-[11px] text-muted-foreground">Generated TLE · epoch at insertion</div>
         </div>
       </div>
       <div className="mt-3 overflow-hidden rounded-md bg-black/40 px-2 py-1.5 font-mono text-[9.5px] leading-snug text-slate-400">
@@ -229,7 +227,7 @@ function MissionOrbitWidget({ plan }: { plan: MissionPlan }) {
         <div className="truncate">{l2}</div>
       </div>
       <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground transition-colors group-hover:text-violet-300">
-        <FileCode2 className="size-3" aria-hidden /> Inspect TLE →
+        <FileCode2 className="size-3" aria-hidden /> Open TLE →
       </div>
     </button>
   )

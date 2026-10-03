@@ -12,7 +12,6 @@ import {
   type LaunchWindow,
 } from '@aperture/orbital-core'
 import { LAND_110M, nightBands, trackToMultiLine } from '@/lib/geo'
-import { CATALOG } from '@/data/catalog'
 import { useMissionStore, type GlobeLayer } from '@/store/mission'
 import { Button } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/Form'
@@ -37,7 +36,6 @@ const LAYERS: ReadonlyArray<{ id: GlobeLayer; label: string }> = [
   { id: 'track', label: 'Ground track' },
   { id: 'ascent', label: 'Ascent' },
   { id: 'footprint', label: 'Coverage' },
-  { id: 'catalog', label: 'Canadian sats' },
   { id: 'terminator', label: 'Day / night' },
   { id: 'graticule', label: 'Grid' },
   { id: 'labels', label: 'Labels' },
@@ -57,7 +55,7 @@ interface HitTarget {
   x: number
   y: number
   r: number
-  id: string
+  id: 'mission' | 'site'
   label: string
 }
 
@@ -294,17 +292,6 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
       if (!pa.hidden) {
         dot(pa.x, pa.y, 3, '#f59e0b')
         label('Apogee', pa.x, pa.y, '#fcd34d')
-      }
-    }
-
-    // Catalog satellites at their altitude
-    if (layers.catalog) {
-      for (const s of CATALOG) {
-        const st = propagate(s.elements, simTime)
-        const q = P(st.latitude, st.longitude, st.radius / EARTH_RADIUS_KM)
-        if (q.hidden || q.x < -10 || q.y < -10 || q.x > width + 10 || q.y > height + 10) continue
-        dot(q.x, q.y, 3, s.color)
-        hits.push({ x: q.x, y: q.y, r: 9, id: s.id, label: `${s.name} · ${s.orbitClass} · ${Math.round(st.altitude).toLocaleString()} km` })
       }
     }
 
@@ -545,7 +532,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
             </Button>
           ))}
         </div>
-        <p className="pointer-events-none absolute bottom-3 left-3 hidden text-[10px] text-slate-400/80 sm:block">Drag to rotate · scroll to zoom · click a satellite or the site</p>
+        <p className="pointer-events-none absolute bottom-3 left-3 hidden text-[10px] text-slate-400/80 sm:block">Drag to rotate · scroll to zoom · click the satellite or the site</p>
       </div>
 
       <dl className="tabular grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
@@ -570,7 +557,6 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
         <li className="flex items-center gap-1.5"><span aria-hidden className="h-0.5 w-4" style={{ backgroundColor: color }} /> Orbit (one ellipse, fixed in space)</li>
         <li className="flex items-center gap-1.5"><span aria-hidden className="h-0 w-4 border-t border-dashed border-violet-400" /> Ground track (Earth turns under it — later revs fade)</li>
         <li className="flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-full bg-sky-400/30" /> Coverage (10° elev.)</li>
-        <li className="flex items-center gap-1.5"><span aria-hidden className="size-2.5 rounded-full bg-pink-400" /> Catalog satellites (J2-propagated, indicative)</li>
       </ul>
     </div>
   )

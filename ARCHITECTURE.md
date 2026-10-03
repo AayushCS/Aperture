@@ -16,13 +16,12 @@ packages/orbital-core      Pure TypeScript engine (only dependency: zod)
   test/engine.test.ts      Physics + behaviour tests (bun test)
 
 apps/launch-watcher        React 18 + Vite + Tailwind
-  src/store/mission.ts     Zustand: mission (TLE text = source of truth), globe settings, inspector
-  src/data/catalog.ts      Canadian satellite TLEs (validated at load)
+  src/store/mission.ts     Zustand: mission (orbit family + apsides + inclination/RAAN/LTAN), globe settings
   src/hooks/               useMissionPlan (engine ⨯ profile ⨯ forecast), useForecast, useNow
   src/lib/                 Formatting, d3-geo helpers (terminator, circles, tracks)
-  src/components/          OrbitGlobe (canvas, 3D ring), OrbitBackdrop, TleEditor/TleView,
-                           ElementEditor, EllipseDiagram, SiteWidget, SatelliteInspector,
-                           CatalogList, CountdownTimer, WeatherPanel, ViewingMap, WindowTable
+  src/components/          OrbitForm (LEO/Polar/SSO), TleDialog/TleView (generated TLE),
+                           OrbitGlobe (canvas, 3D ring), OrbitBackdrop, EllipseDiagram,
+                           SiteWidget, CountdownTimer, WeatherPanel, ViewingMap, WindowTable
   src/pages/               Dashboard, LaunchPlanner, OrbitVisualizer
 ```
 

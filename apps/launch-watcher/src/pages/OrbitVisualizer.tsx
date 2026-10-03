@@ -1,19 +1,18 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Globe2, Info, Orbit, Satellite } from 'lucide-react'
+import { ArrowRight, FileCode2, Globe2, Info, Orbit, Satellite } from 'lucide-react'
 import { useMissionPlan } from '@/hooks/useMissionPlan'
 import { useMissionStore } from '@/store/mission'
 import MissionHeading from '@/components/MissionHeading'
 import OrbitGlobe from '@/components/OrbitGlobe'
 import IssueList from '@/components/IssueList'
 import EllipseDiagram from '@/components/EllipseDiagram'
-import CatalogList from '@/components/CatalogList'
+import { GeneratedTle } from '@/components/TleDialog'
 import { SiteCard } from '@/components/SiteWidget'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { Stat } from '@/components/ui/Badge'
 import { Button, buttonVariants } from '@/components/ui/Button'
-import { CLASS_COLOR } from '@/data/catalog'
-import { CLASS_LABEL, hhmm } from '@/lib/orbitStats'
+import { CLASS_COLOR, CLASS_LABEL, hhmm } from '@/lib/orbitStats'
 import { fmt } from '@/lib/format'
 
 export default function OrbitVisualizer() {
@@ -53,7 +52,7 @@ export default function OrbitVisualizer() {
             <CardHeader
               icon={<Orbit />}
               title="The orbit in its plane"
-              description={`${CLASS_LABEL[analysis.orbitClass]} · from ${tle.name ?? 'TLE'}`}
+              description={`${CLASS_LABEL[analysis.orbitClass]} · ${mission.orbitType} target`}
               action={
                 orbit.eccentricity < 0.05 && (
                   <Button size="sm" variant="ghost" onClick={() => setExaggerate((v) => !v)} aria-pressed={exaggerate}>
@@ -79,7 +78,7 @@ export default function OrbitVisualizer() {
                 )}
               </dl>
               <Button variant="secondary" className="w-full" onClick={() => inspect('mission')}>
-                <Satellite aria-hidden /> Inspect TLE
+                <Satellite aria-hidden /> Open TLE
               </Button>
             </CardBody>
           </Card>
@@ -106,9 +105,9 @@ export default function OrbitVisualizer() {
       <div className="grid gap-6 lg:grid-cols-3">
         <SiteCard opportunities={analysis.opportunities} className="self-start" />
         <Card className="lg:col-span-2">
-          <CardHeader icon={<Satellite />} title="Canadian satellites" description="Shown on the globe at their altitude. Click to inspect, or target one's orbit." />
+          <CardHeader icon={<FileCode2 />} title="Generated TLE" description="The orbit on the globe, as flown from Canso" />
           <CardBody>
-            <CatalogList />
+            <GeneratedTle plan={plan} />
           </CardBody>
         </Card>
       </div>

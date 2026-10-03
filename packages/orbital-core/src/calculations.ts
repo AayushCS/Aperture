@@ -39,6 +39,7 @@ import type {
   LightingInfo,
   MissionAnalysis,
   OrbitClass,
+  OrbitalElements,
   PassBranch,
   TrajectoryPoint,
   WeatherRisk,
@@ -224,6 +225,45 @@ export class OrbitalEngine {
       groundTrackShiftDeg: groundTrackShiftFor(el),
       opportunities,
     }
+  }
+
+  /**
+   * Design a target orbit for a launch from `site`: size and shape from perigee / apogee,
+   * and the argument of perigee chosen so the first allowed pass injects at perigee.
+   * The result always "crosses paths" with the site — every window launches into it.
+   */
+  designOrbit(params: {
+    site: LaunchSite
+    vehicle?: CalculationInput['vehicle']
+    epoch: Date
+    perigeeAltitude: number
+    apogeeAltitude: number
+    inclination: number
+    raan: number
+  }): OrbitalElements {
+    const { site, vehicle, epoch, inclination, raan } = params
+    const rp = EARTH_RADIUS_KM + Math.min(params.perigeeAltitude, params.apogeeAltitude)
+    const ra = EARTH_RADIUS_KM + Math.max(params.perigeeAltitude, params.apogeeAltitude)
+    let el: OrbitalElements = {
+      epoch,
+      semiMajorAxis: (rp + ra) / 2,
+      eccentricity: (ra - rp) / (ra + rp),
+      inclination,
+      raan: normalizeAngle(raan),
+      argOfPerigee: 0,
+      meanAnomaly: 0,
+    }
+    if (el.eccentricity < 1e-6) return el
+    const dateRange = { start: epoch, end: new Date(epoch.getTime() + MS_PER_DAY) }
+    // Insertion latitude depends weakly on the insertion altitude; two or three passes converge
+    for (let k = 0; k < 3; k++) {
+      const pass = this.geometries({ orbit: el, launchSite: site, vehicle, dateRange }).find(
+        ({ geometry }) => corridorMargin(geometry.azimuth, site) >= 0
+      )
+      if (!pass) break
+      el = { ...el, argOfPerigee: pass.insertion.argumentOfLatitude }
+    }
+    return el
   }
 
   /** Calculate all launch windows in the date range, sorted chronologically */

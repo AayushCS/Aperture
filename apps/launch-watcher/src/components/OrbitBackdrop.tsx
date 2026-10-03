@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { CATALOG } from '@/data/catalog'
-import { useMissionStore } from '@/store/mission'
-import { parseMissionTle } from '@/hooks/useMissionPlan'
-import { tleToElements, EARTH_RADIUS_KM, meanToTrueAnomaly, type OrbitalElements } from '@aperture/orbital-core'
+import { useMissionStore, ORBIT_PRESETS } from '@/store/mission'
+import { designMissionOrbit } from '@/hooks/useMissionPlan'
+import { EARTH_RADIUS_KM, meanToTrueAnomaly, type OrbitalElements } from '@aperture/orbital-core'
 
 const D = Math.PI / 180
+const FAMILY_COLORS = { LEO: '#38bdf8', POLAR: '#2dd4bf', SSO: '#a78bfa' } as const
 const reducedMotion = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
 interface BackdropOrbit {
@@ -19,14 +19,14 @@ interface BackdropOrbit {
 const displayRho = (rho: number) => 1.22 + (1.7 * Math.log(Math.max(1, rho))) / Math.log(6.6)
 
 /**
- * Decorative full-page backdrop: the real catalog orbits and the mission orbit
+ * Decorative full-page backdrop: faint LEO / polar / SSO reference orbits and the mission orbit
  * (log-scaled radii) circling a dim Earth, with satellites moving at Kepler speed.
  * Purely visual — hidden from assistive technology, paused when the tab is hidden
  * and static under prefers-reduced-motion.
  */
 export default function OrbitBackdrop() {
   const ref = useRef<HTMLCanvasElement>(null)
-  const missionTle = useMissionStore((s) => s.mission.tle)
+  const mission = useMissionStore((s) => s.mission)
 
   useEffect(() => {
     const canvas = ref.current
@@ -34,9 +34,19 @@ export default function OrbitBackdrop() {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    const epoch = new Date('2027-12-01T00:00:00Z')
     const orbits: BackdropOrbit[] = [
-      ...CATALOG.map((s, i) => ({ el: s.elements, color: s.color, width: 0.8, phase: i * 47, mission: false })),
-      { el: tleToElements(parseMissionTle(missionTle)), color: '#e9d5ff', width: 1.6, phase: 0, mission: true },
+      // Reference planes for each family, spread around the Earth, plus the mission orbit highlighted
+      ...(['LEO', 'POLAR', 'SSO'] as const).flatMap((f, i) =>
+        [0, 120, 240].map((raan, j) => ({
+          el: designMissionOrbit({ ...mission, orbitType: f, ...ORBIT_PRESETS[f], raan: raan + i * 40, ltan: 10 + j * 4 }, epoch),
+          color: FAMILY_COLORS[f],
+          width: 0.8,
+          phase: i * 97 + j * 53,
+          mission: false,
+        }))
+      ),
+      { el: designMissionOrbit(mission, epoch), color: '#e9d5ff', width: 1.6, phase: 0, mission: true },
     ]
 
     let raf = 0
@@ -149,7 +159,7 @@ export default function OrbitBackdrop() {
       document.removeEventListener('visibilitychange', onVisibility)
       globalThis.removeEventListener('resize', onResize)
     }
-  }, [missionTle])
+  }, [mission])
 
   return <canvas ref={ref} aria-hidden className="pointer-events-none fixed inset-0 z-0 h-full w-full opacity-70" />
 }

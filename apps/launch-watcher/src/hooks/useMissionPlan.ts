@@ -2,10 +2,10 @@ import { useMemo } from 'react'
 import {
   COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
+  elementsToTle,
   nextWindow,
   orbitalEngine,
-  parseTle,
-  tleToElements,
+  raanForLtan,
   type CalculationInput,
   type LaunchSite,
   type LaunchWindow,
@@ -14,7 +14,7 @@ import {
   type Tle,
   type VehicleParams,
 } from '@aperture/orbital-core'
-import { DEFAULT_MISSION, useMissionStore, type MissionProfile } from '@/store/mission'
+import { useMissionStore, type MissionProfile } from '@/store/mission'
 import { useForecast } from './useForecast'
 
 /** The only launch site */
@@ -24,8 +24,10 @@ export interface MissionPlan {
   mission: MissionProfile
   site: LaunchSite
   vehicle: VehicleParams
-  tle: Tle
+  /** Designed target orbit (epoch = search start) */
   orbit: OrbitalElements
+  /** Generated TLE: the as-flown orbit of the focused window (or the target if there is none) */
+  tle: Tle
   input: CalculationInput
   analysis: MissionAnalysis
   windows: LaunchWindow[]
@@ -45,25 +47,40 @@ function startOfSearch(startDate: string): Date {
   return new Date(Date.now() - 60 * 60 * 1000)
 }
 
-export function parseMissionTle(text: string): Tle {
-  const r = parseTle(text)
-  if (r.ok) return r.tle
-  // The store only commits valid TLEs; this is a last-resort guard
-  const fallback = parseTle(DEFAULT_MISSION.tle)
-  if (!fallback.ok) throw new Error('Built-in mission TLE is invalid')
-  return fallback.tle
+/** The user's orbit, designed to inject at perigee from the spaceport */
+export function designMissionOrbit(mission: MissionProfile, epoch: Date): OrbitalElements {
+  return orbitalEngine.designOrbit({
+    site: SITE,
+    vehicle: COMMON_VEHICLES[mission.vehicleId],
+    epoch,
+    perigeeAltitude: mission.perigee,
+    apogeeAltitude: mission.apogee,
+    inclination: mission.inclination,
+    raan: mission.orbitType === 'SSO' ? raanForLtan(mission.ltan, epoch) : mission.raan,
+  })
 }
 
-export function buildInput(mission: MissionProfile, orbit: OrbitalElements, weather?: CalculationInput['weather']): CalculationInput {
+export function buildInput(mission: MissionProfile, weather?: CalculationInput['weather']): CalculationInput {
   const start = startOfSearch(mission.startDate)
   return {
-    orbit,
+    orbit: designMissionOrbit(mission, start),
     vehicle: COMMON_VEHICLES[mission.vehicleId],
     launchSite: SITE,
     dateRange: { start, end: new Date(start.getTime() + mission.spanDays * 86_400_000) },
     constraints: { daylightOnly: mission.daylightOnly, maxWeatherRisk: mission.maxWeatherRisk },
     weather,
   }
+}
+
+/** TLE for an orbit: hypothetical catalog number in the unassigned 99xxx range */
+export function missionTle(mission: MissionProfile, el: OrbitalElements): Tle {
+  const name = (mission.name.trim() || 'MISSION').toUpperCase().slice(0, 24)
+  return elementsToTle(el, {
+    name,
+    catalogNumber: '99901',
+    intlDesignator: `${String(el.epoch.getUTCFullYear() % 100).padStart(2, '0')}999A`,
+    elementSetNumber: 1,
+  })
 }
 
 /** Reactive launch plan for the persisted mission profile */
@@ -74,23 +91,23 @@ export function useMissionPlan(): MissionPlan {
   const forecastQuery = useForecast(SITE)
 
   const computed = useMemo(() => {
-    const tle = parseMissionTle(mission.tle)
-    const orbit = tleToElements(tle)
-    const input = buildInput(mission, orbit, forecastQuery.data)
+    const input = buildInput(mission, forecastQuery.data)
     const analysis = orbitalEngine.analyzeMission(input)
     const windows = analysis.feasible ? orbitalEngine.calculateLaunchWindows(input) : []
-    return { tle, orbit, input, analysis, windows }
+    return { input, analysis, windows, orbit: input.orbit }
   }, [mission, forecastQuery.data])
 
   const now = new Date()
   const next = nextWindow(computed.windows, now > computed.input.dateRange.start ? now : computed.input.dateRange.start)
   const focus = computed.windows.find((w) => w.id === selectedId) ?? next
+  const tle = useMemo(() => missionTle(mission, focus?.orbit ?? computed.orbit), [mission, focus, computed.orbit])
 
   return {
     mission,
     site: SITE,
     vehicle,
     ...computed,
+    tle,
     next,
     focus,
     forecast: {

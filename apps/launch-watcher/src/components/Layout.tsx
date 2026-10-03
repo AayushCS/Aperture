@@ -2,7 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { CalendarClock, Globe2, Radar } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import OrbitBackdrop from './OrbitBackdrop'
-import SatelliteInspector from './SatelliteInspector'
+import TleDialog from './TleDialog'
 import { SiteDialog } from './SiteWidget'
 
 const NAV = [
@@ -65,12 +65,12 @@ export default function Layout() {
             <a className="underline-offset-2 hover:underline" href="https://open-meteo.com/" target="_blank" rel="noreferrer">
               Open-Meteo
             </a>{' '}
-            · Map data: Natural Earth · TLEs: CelesTrak format
+            · Map data: Natural Earth
           </span>
         </div>
       </footer>
     </div>
-    <SatelliteInspector />
+    <TleDialog />
     <SiteDialog />
     </>
   )

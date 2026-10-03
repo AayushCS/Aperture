@@ -8,8 +8,8 @@ import MissionHeading from '@/components/MissionHeading'
 import IssueList from '@/components/IssueList'
 import WeatherPanel from '@/components/WeatherPanel'
 import WindowTable, { LightingLabel, ScoreBar } from '@/components/WindowTable'
-import TleEditor from '@/components/TleEditor'
-import ElementEditor from '@/components/ElementEditor'
+import OrbitForm from '@/components/OrbitForm'
+import { GeneratedTle } from '@/components/TleDialog'
 import EllipseDiagram from '@/components/EllipseDiagram'
 import { SiteCard } from '@/components/SiteWidget'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
@@ -66,7 +66,7 @@ export default function LaunchPlanner() {
         eyebrow="Window planner"
         title={mission.name || 'Untitled mission'}
         action={
-          <Button variant="ghost" size="sm" onClick={() => { reset(); toast('Mission reset to APERTURE-1') }}>
+          <Button variant="ghost" size="sm" onClick={() => { reset(); toast('Mission reset to defaults') }}>
             <RotateCcw aria-hidden /> Reset
           </Button>
         }
@@ -75,16 +75,16 @@ export default function LaunchPlanner() {
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-3">
           <Card className="animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-            <CardHeader icon={<FileCode2 />} title="Target orbit · TLE" description="The mission is one orbit. The TLE is the source of truth; the elements below edit it." />
+            <CardHeader icon={<Orbit />} title="Target orbit" description="Choose the orbit type and shape. It is designed to inject at perigee from Canso." />
             <CardBody>
-              <TleEditor />
+              <OrbitForm analysis={analysis} />
             </CardBody>
           </Card>
 
           <Card className="animate-in fade-in-0 slide-in-from-bottom-2 duration-700">
-            <CardHeader icon={<Orbit />} title="Orbital elements" description="Changes regenerate the TLE (checksums included) and recalculate instantly" />
+            <CardHeader icon={<FileCode2 />} title="Generated TLE" description="One orbit, produced from your inputs and the selected launch window" />
             <CardBody>
-              <ElementEditor orbit={orbit} analysis={analysis} />
+              <GeneratedTle plan={plan} />
             </CardBody>
           </Card>
 

@@ -14,7 +14,7 @@ export default function MissionHeading({
   eyebrow: string
   action?: ReactNode
 }) {
-  const { site, vehicle, forecast, analysis, orbit, tle } = plan
+  const { site, vehicle, forecast, analysis, orbit, mission } = plan
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
@@ -23,14 +23,12 @@ export default function MissionHeading({
           {title}
         </h1>
         <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
-          <span>{tle.name ?? `#${tle.catalogNumber}`}</span>
-          <span aria-hidden>·</span>
           <span>{vehicle.name}</span>
           <span aria-hidden>·</span>
           <span>{site.name}</span>
           <span aria-hidden>·</span>
           <span className="tabular">
-            {analysis.orbitClass} {Math.round(analysis.perigeeAltitudeKm)} × {Math.round(analysis.apogeeAltitudeKm)} km × {fmt.deg(orbit.inclination, 2)}
+            {mission.orbitType} {Math.round(analysis.perigeeAltitudeKm)} × {Math.round(analysis.apogeeAltitudeKm)} km × {fmt.deg(orbit.inclination, 2)}
           </span>
         </p>
       </div>

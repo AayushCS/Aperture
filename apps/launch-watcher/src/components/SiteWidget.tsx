@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { MapPin, Rocket } from 'lucide-react'
-import { orbitalEngine, tleToElements, type LaunchOpportunity } from '@aperture/orbital-core'
+import { orbitalEngine, type LaunchOpportunity } from '@aperture/orbital-core'
 import { useMissionStore } from '@/store/mission'
-import { SITE, buildInput, parseMissionTle } from '@/hooks/useMissionPlan'
+import { SITE, buildInput } from '@/hooks/useMissionPlan'
 import { Dialog } from '@/components/ui/Dialog'
 import { Stat } from '@/components/ui/Badge'
 import CorridorCompass from '@/components/CorridorCompass'
@@ -33,7 +33,7 @@ export function SiteDialog() {
   const inspecting = useMissionStore((s) => s.inspecting)
   const mission = useMissionStore((s) => s.mission)
   const opportunities = useMemo(
-    () => orbitalEngine.analyzeMission(buildInput(mission, tleToElements(parseMissionTle(mission.tle)))).opportunities,
+    () => orbitalEngine.analyzeMission(buildInput(mission)).opportunities,
     [mission]
   )
   const inspect = useMissionStore((s) => s.inspect)

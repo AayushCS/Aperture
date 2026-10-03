@@ -47,6 +47,15 @@ export function summarizeOrbit(el: OrbitalElements, at: Date = new Date()): Orbi
   }
 }
 
+export const CLASS_COLOR: Record<OrbitClass, string> = {
+  LEO: '#38bdf8',
+  POLAR: '#2dd4bf',
+  SSO: '#a78bfa',
+  MEO: '#fbbf24',
+  GEO: '#f472b6',
+  HEO: '#fb923c',
+}
+
 export const CLASS_LABEL: Record<OrbitClass, string> = {
   LEO: 'Low Earth orbit',
   POLAR: 'Polar orbit',

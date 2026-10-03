@@ -495,6 +495,26 @@ describe('Spaceport Nova Scotia', () => {
     expect(allowed[0]!.azimuth).toBeLessThan(100)
   })
 
+  test('designOrbit: user-specified LEO / polar / SSO orbits inject at perigee from Canso', () => {
+    const cases = [
+      { perigeeAltitude: 450, apogeeAltitude: 700, inclination: 51.6 },
+      { perigeeAltitude: 550, apogeeAltitude: 900, inclination: 90 },
+      { perigeeAltitude: 500, apogeeAltitude: 800, inclination: MISSION.inclination },
+    ]
+    for (const c of cases) {
+      const orbit = engine.designOrbit({ site: NOVA_SCOTIA, vehicle: SPECTRUM, epoch: SEASON, raan: 30, ...c })
+      expect(perigeeAltitude(orbit)).toBeCloseTo(c.perigeeAltitude, 6)
+      const [w] = engine.calculateLaunchWindows(mission(orbit))
+      expect(w).toBeDefined()
+      expect(w!.insertion.altitude).toBeCloseTo(c.perigeeAltitude, 0)
+      // The generated as-flown orbit starts right where the Canso ascent ends
+      const s = propagate(w!.orbit, w!.insertion.time)
+      expect(calculateDistance(s.latitude, s.longitude, w!.insertion.latitude, w!.insertion.longitude)).toBeLessThan(5)
+    }
+    const circ = engine.designOrbit({ site: NOVA_SCOTIA, epoch: SEASON, raan: 0, perigeeAltitude: 600, apogeeAltitude: 600, inclination: 90 })
+    expect(circ.eccentricity).toBe(0)
+  })
+
   test('Atlantic climatology: winters are windier than summers', () => {
     const wind = (month: number) =>
       Array.from({ length: 28 }, (_, d) => climatologicalWeather(NOVA_SCOTIA, new Date(Date.UTC(2027, month, 1 + d, 15))).windSpeedKt).reduce((a, b) => a + b)
