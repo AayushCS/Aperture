@@ -1,23 +1,24 @@
 /**
- * Circular-orbit mechanics: period, J2 nodal precession, launch azimuth
- * and plane-crossing geometry.
+ * Launch geometry: reachability, launch azimuth and plane-crossing timing,
+ * plus convenience helpers for circular orbits.
  */
-import {
-  EARTH_RADIUS_KM,
-  EARTH_ROTATION_RAD_S,
-  J2,
-  MU_EARTH,
-  SECONDS_PER_DAY,
-  SUN_RATE_DEG_DAY,
-} from './constants'
+import { EARTH_RADIUS_KM, EARTH_ROTATION_RAD_S, MU_EARTH, SIDEREAL_RATE_DEG_DAY } from './constants'
 import { gmst } from './astro'
 import { degToRad, normalizeAngle, radToDeg, wrap180 } from './math'
+import { groundTrackShiftFor, secularRates, sunSynchronousInclinationFor } from './elements'
+import type { PassBranch } from './types'
+
+const circular = (altitudeKm: number, inclination = 0) => ({
+  semiMajorAxis: EARTH_RADIUS_KM + altitudeKm,
+  eccentricity: 0,
+  inclination,
+})
 
 export function semiMajorAxis(altitudeKm: number): number {
   return EARTH_RADIUS_KM + altitudeKm
 }
 
-/** Orbital period (s) of a circular orbit */
+/** Keplerian period (s) of a circular orbit */
 export function orbitalPeriod(altitudeKm: number): number {
   return 2 * Math.PI * Math.sqrt(semiMajorAxis(altitudeKm) ** 3 / MU_EARTH)
 }
@@ -27,37 +28,30 @@ export function circularVelocity(altitudeKm: number): number {
   return Math.sqrt(MU_EARTH / semiMajorAxis(altitudeKm))
 }
 
-/** Mean motion (rad/s) */
+/** Keplerian mean motion of a circular orbit (rad/s) */
 export function meanMotion(altitudeKm: number): number {
   return Math.sqrt(MU_EARTH / semiMajorAxis(altitudeKm) ** 3)
 }
 
-/** Secular J2 regression of the ascending node (deg/day). Negative = westward drift. */
+/** Secular J2 regression of the ascending node for a circular orbit (deg/day). Negative = westward. */
 export function nodalPrecession(altitudeKm: number, inclinationDeg: number): number {
-  const a = semiMajorAxis(altitudeKm)
-  const rate = -1.5 * meanMotion(altitudeKm) * J2 * (EARTH_RADIUS_KM / a) ** 2 * Math.cos(degToRad(inclinationDeg))
-  return radToDeg(rate) * SECONDS_PER_DAY
+  return secularRates(circular(altitudeKm, inclinationDeg)).raanRate
 }
 
 /** Inclination (deg) that makes a circular orbit at this altitude sun-synchronous */
 export function sunSynchronousInclination(altitudeKm: number): number {
-  const a = semiMajorAxis(altitudeKm)
-  const k = radToDeg(1.5 * meanMotion(altitudeKm) * J2 * (EARTH_RADIUS_KM / a) ** 2) * SECONDS_PER_DAY
-  return radToDeg(Math.acos(-SUN_RATE_DEG_DAY / k))
+  return sunSynchronousInclinationFor(semiMajorAxis(altitudeKm), 0)
 }
 
-/** Ground-track westward shift per revolution at the equator (deg) */
+/** Ground-track westward shift per revolution at the equator for a circular orbit (deg) */
 export function groundTrackShift(altitudeKm: number, inclinationDeg: number): number {
-  const periodDays = orbitalPeriod(altitudeKm) / SECONDS_PER_DAY
-  return (360.98564736629 - nodalPrecession(altitudeKm, inclinationDeg)) * periodDays
+  return groundTrackShiftFor({ ...circular(altitudeKm, inclinationDeg), epoch: new Date(0), raan: 0, argOfPerigee: 0, meanAnomaly: 0 })
 }
 
 /** Eastward surface speed due to Earth's rotation at a latitude (km/s) */
 export function surfaceRotationSpeed(latitudeDeg: number): number {
   return EARTH_ROTATION_RAD_S * EARTH_RADIUS_KM * Math.cos(degToRad(latitudeDeg))
 }
-
-export type PassBranch = 'ascending' | 'descending'
 
 export interface PlaneGeometry {
   branch: PassBranch
@@ -81,12 +75,9 @@ export function isDirectlyReachable(latitudeDeg: number, inclinationDeg: number)
 /**
  * Plane-crossing geometry for both passes of the launch site under a target orbital plane.
  * Returns an empty array when the inclination is unreachable from the site latitude.
+ * @param insertionSpeedKmS inertial speed at orbit insertion (sets the Earth-relative azimuth)
  */
-export function planeGeometry(
-  latitudeDeg: number,
-  inclinationDeg: number,
-  altitudeKm: number
-): PlaneGeometry[] {
+export function planeGeometry(latitudeDeg: number, inclinationDeg: number, insertionSpeedKmS: number): PlaneGeometry[] {
   if (!isDirectlyReachable(latitudeDeg, inclinationDeg)) return []
 
   const phi = degToRad(latitudeDeg)
@@ -95,13 +86,11 @@ export function planeGeometry(
   const beta = radToDeg(Math.asin(sinBeta))
   const sinU = Math.max(-1, Math.min(1, Math.sin(phi) / Math.sin(inc)))
   const u = radToDeg(Math.asin(sinU))
-
-  const vOrbit = circularVelocity(altitudeKm)
   const vRot = surfaceRotationSpeed(latitudeDeg)
 
   const build = (branch: PassBranch, inertialAz: number, argLat: number): PlaneGeometry => {
     const az = degToRad(inertialAz)
-    const relative = Math.atan2(vOrbit * Math.sin(az) - vRot, vOrbit * Math.cos(az))
+    const relative = Math.atan2(insertionSpeedKmS * Math.sin(az) - vRot, insertionSpeedKmS * Math.cos(az))
     const uRad = degToRad(argLat)
     return {
       branch,
@@ -131,7 +120,7 @@ export function nextPlaneCrossing(
   raanAt: (t: Date) => number,
   raanRateDegDay: number
 ): { time: Date; periodMs: number } {
-  const relativeRate = 360.98564736629 - raanRateDegDay // deg/day
+  const relativeRate = SIDEREAL_RATE_DEG_DAY - raanRateDegDay // deg/day
   const residual = (t: Date) => wrap180(gmst(t) + longitude - raanAt(t) - nodeOffset)
 
   let t = new Date(from.getTime() + (normalizeAngle(-residual(from)) / relativeRate) * 86_400_000)
@@ -140,67 +129,4 @@ export function nextPlaneCrossing(
   if (t < from) t = new Date(t.getTime() + (360 / relativeRate) * 86_400_000)
 
   return { time: t, periodMs: (360 / relativeRate) * 86_400_000 }
-}
-
-export interface GroundTrackPoint {
-  time: Date
-  latitude: number
-  longitude: number
-}
-
-/**
- * Ground track of a circular orbit passing through a given point at `epoch`
- * (e.g. the orbit insertion point), so ascent and orbit connect seamlessly.
- */
-export function groundTrackFromPoint(params: {
-  altitudeKm: number
-  inclinationDeg: number
-  latitude: number
-  longitude: number
-  branch: PassBranch
-  epoch: Date
-  durationSec: number
-  stepSec?: number
-}): GroundTrackPoint[] {
-  const { altitudeKm, inclinationDeg, latitude, longitude, branch, epoch, durationSec, stepSec } = params
-  const inc = degToRad(inclinationDeg)
-  const sinU = Math.max(-1, Math.min(1, Math.sin(degToRad(latitude)) / Math.sin(inc)))
-  const u0 = radToDeg(Math.asin(sinU))
-  const argumentOfLatitude = branch === 'ascending' ? u0 : 180 - u0
-  const uRad = degToRad(argumentOfLatitude)
-  const alpha = radToDeg(Math.atan2(Math.cos(inc) * Math.sin(uRad), Math.cos(uRad)))
-  const raan = normalizeAngle(longitude + gmst(epoch) - alpha)
-  return groundTrack({ altitudeKm, inclinationDeg, raan, argumentOfLatitude, epoch, durationSec, stepSec })
-}
-
-/**
- * Ground track of a circular orbit.
- * @param raan right ascension of ascending node (deg) at `epoch`
- * @param argumentOfLatitude satellite argument of latitude (deg) at `epoch`
- */
-export function groundTrack(params: {
-  altitudeKm: number
-  inclinationDeg: number
-  raan: number
-  argumentOfLatitude: number
-  epoch: Date
-  durationSec: number
-  stepSec?: number
-}): GroundTrackPoint[] {
-  const { altitudeKm, inclinationDeg, raan, argumentOfLatitude, epoch, durationSec } = params
-  const step = params.stepSec ?? 30
-  const n = radToDeg(meanMotion(altitudeKm)) // deg/s
-  const raanRate = nodalPrecession(altitudeKm, inclinationDeg) / SECONDS_PER_DAY
-  const inc = degToRad(inclinationDeg)
-  const points: GroundTrackPoint[] = []
-
-  for (let s = 0; s <= durationSec; s += step) {
-    const time = new Date(epoch.getTime() + s * 1000)
-    const u = degToRad(argumentOfLatitude + n * s)
-    const latitude = radToDeg(Math.asin(Math.sin(inc) * Math.sin(u)))
-    const alpha = radToDeg(Math.atan2(Math.cos(inc) * Math.sin(u), Math.cos(u)))
-    const longitude = wrap180(raan + raanRate * s + alpha - gmst(time))
-    points.push({ time, latitude, longitude })
-  }
-  return points
 }

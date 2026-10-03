@@ -10,7 +10,8 @@
  */
 import { json2satrec, sgp4, type OMMJsonObject, type SatRec } from 'satellite.js'
 import { EARTH_RADIUS_KM, MU_EARTH, SECONDS_PER_DAY } from './constants'
-import { circularVelocity, meanMotion, nodalPrecession, semiMajorAxis, type PassBranch } from './orbit'
+import { circularVelocity, meanMotion, nodalPrecession, semiMajorAxis } from './orbit'
+import type { PassBranch } from './types'
 import { clamp, degToRad } from './math'
 import { parseGpRecord } from './traffic'
 

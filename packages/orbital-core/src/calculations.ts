@@ -1,54 +1,72 @@
 /**
  * Launch window engine.
  *
+ * The mission is a single target orbit (mean elements, usually from a TLE).
  * A launch window opens when Earth's rotation carries the launch site through
- * the target orbital plane. For each day the engine solves for those plane
- * crossings directly (rather than brute-force scanning), applies range-safety
- * azimuth corridors, vehicle limits, lighting and weather constraints, and
- * scores each opportunity.
+ * that orbit's plane, whose node is propagated from the TLE epoch with J2.
+ * For each day the engine solves for those plane crossings directly, applies
+ * range-safety azimuth corridors, vehicle limits, lighting and weather
+ * constraints, places the insertion point on the target ellipse and scores
+ * each opportunity.
  */
-import { EARTH_ROTATION_RAD_S, MS_PER_DAY, SUN_RATE_DEG_DAY } from './constants'
-import { meanSunRightAscension } from './astro'
-import { clamp, normalizeAngle, radToDeg } from './math'
+import { EARTH_RADIUS_KM, EARTH_ROTATION_RAD_S, MS_PER_DAY, SECONDS_PER_DAY, SUN_RATE_DEG_DAY } from './constants'
+import { clamp, normalizeAngle, radToDeg, wrap180 } from './math'
 import {
-  circularVelocity,
-  groundTrackShift,
-  isDirectlyReachable,
-  nextPlaneCrossing,
-  nodalPrecession,
-  orbitalPeriod,
-  planeGeometry,
-  sunSynchronousInclination,
-  type PlaneGeometry,
-} from './orbit'
+  anomalisticPeriod,
+  apogeeAltitude,
+  argumentOfLatitudeAt,
+  classifyOrbit,
+  groundTrackShiftFor,
+  isSunSynchronous,
+  ltanAt,
+  perigeeAltitude,
+  radiusAt,
+  raanThroughPoint,
+  secularRates,
+  sunSynchronousInclinationFor,
+  trueToMeanAnomaly,
+  visVivaSpeed,
+} from './elements'
+import { isDirectlyReachable, nextPlaneCrossing, planeGeometry, type PlaneGeometry } from './orbit'
 import { ascentTrajectory, lightingAt, visibilityRegions } from './trajectory'
 import { weatherAt } from './weather'
 import type {
   CalculationInput,
   FeasibilityIssue,
+  LaunchOpportunity,
   LaunchSite,
   LaunchWindow,
   LightingInfo,
   MissionAnalysis,
-  OrbitType,
+  OrbitClass,
+  OrbitalElements,
+  PassBranch,
+  TrajectoryPoint,
   WeatherRisk,
 } from './types'
 
-/** Default allowable RAAN error per orbit family (deg) → sets window width */
-export const DEFAULT_RAAN_TOLERANCE: Record<OrbitType, number> = {
+/** Default allowable RAAN error per orbit class (deg) → sets window width */
+export const DEFAULT_RAAN_TOLERANCE: Record<OrbitClass, number> = {
   LEO: 2,
   POLAR: 1,
   SSO: 0.5,
+  MEO: 2,
+  GEO: 2,
+  HEO: 1,
 }
-
-/** Default local time of ascending node for SSO missions (22:30 ⇒ 10:30 descending) */
-export const DEFAULT_LTAN = 22.5
 
 /** Hard cap on search span to keep calculations bounded */
 export const MAX_RANGE_DAYS = 366
 
+/** Lowest perigee (km) treated as a viable orbit */
+export const MIN_PERIGEE_KM = 150
+
+/** Plane propagation older than this (days) from the TLE epoch is flagged */
+export const STALE_EPOCH_DAYS = 30
+
 const RISK_ORDER: Record<WeatherRisk, number> = { low: 0, medium: 1, high: 2 }
 const EARTH_ROTATION_DEG_S = radToDeg(EARTH_ROTATION_RAD_S)
+const DEFAULT_ASCENT_SEC = 540
 
 /** Is an azimuth inside any of the site's corridors? Returns the margin to the nearest edge (deg) or -1. */
 export function corridorMargin(azimuth: number, site: LaunchSite): number {
@@ -64,12 +82,28 @@ export function corridorMargin(azimuth: number, site: LaunchSite): number {
   return best
 }
 
+/** Where a pass inserts into the target ellipse. Independent of date: the ascent is Earth-relative. */
+interface InsertionGeometry {
+  trajectory: TrajectoryPoint[]
+  altitude: number
+  trueAnomaly: number
+  argumentOfLatitude: number
+  /** Direction of travel at insertion (may differ from the launch pass after crossing a vertex) */
+  heading: PassBranch
+}
+
 export class OrbitalEngine {
-  /** Validate the mission and describe the available launch geometry */
+  /** Validate the mission and describe the orbit and launch geometry */
   analyzeMission(input: CalculationInput): MissionAnalysis {
-    const { orbit, vehicle, launchSite: site, dateRange } = input
+    const { orbit: el, vehicle, launchSite: site, dateRange } = input
     const issues: FeasibilityIssue[] = []
-    const ssoInclination = sunSynchronousInclination(orbit.altitude)
+    const rates = secularRates(el)
+    const rp = perigeeAltitude(el)
+    const ra = apogeeAltitude(el)
+    const orbitClass = classifyOrbit(el)
+    const ssoInclination = sunSynchronousInclinationFor(el.semiMajorAxis, el.eccentricity)
+    const sunSynchronous = isSunSynchronous(el)
+    const km = (v: number) => `${Math.round(v).toLocaleString('en-US')} km`
 
     if (!(dateRange.end > dateRange.start)) {
       issues.push({ severity: 'error', code: 'DATE_RANGE', message: 'End date must be after start date.' })
@@ -77,55 +111,84 @@ export class OrbitalEngine {
       issues.push({ severity: 'error', code: 'DATE_RANGE', message: `Date range is limited to ${MAX_RANGE_DAYS} days.` })
     }
 
-    if (!isDirectlyReachable(site.latitude, orbit.inclination)) {
+    if (site.operationalFrom && dateRange.start < site.operationalFrom) {
+      issues.push({
+        severity: 'warning',
+        code: 'SITE_NOT_OPERATIONAL',
+        message: `${site.name} is not expected to support orbital launches before ${site.operationalFrom.toISOString().slice(0, 10)}. Windows earlier than that are hypothetical.`,
+      })
+    }
+
+    if (rp < MIN_PERIGEE_KM) {
+      issues.push({
+        severity: 'error',
+        code: 'PERIGEE_TOO_LOW',
+        message: `Perigee of ${km(rp)} is inside the dense atmosphere; the orbit would decay almost immediately (minimum ${MIN_PERIGEE_KM} km).`,
+      })
+    }
+
+    if (!isDirectlyReachable(site.latitude, el.inclination)) {
       const min = Math.abs(site.latitude)
       issues.push({
         severity: 'error',
         code: 'INCLINATION_UNREACHABLE',
-        message: `${orbit.inclination.toFixed(1)}° cannot be reached by direct ascent from ${site.name} (latitude ${min.toFixed(1)}°). Reachable range is ${min.toFixed(1)}°–${(180 - min).toFixed(1)}°.`,
+        message: `${el.inclination.toFixed(1)}° cannot be reached by direct ascent from ${site.name} (latitude ${min.toFixed(1)}°). Reachable range is ${min.toFixed(1)}°–${(180 - min).toFixed(1)}°.`,
       })
     }
 
     if (vehicle) {
-      if (orbit.inclination < vehicle.minInclination || orbit.inclination > vehicle.maxInclination) {
+      if (el.inclination < vehicle.minInclination || el.inclination > vehicle.maxInclination) {
         issues.push({
           severity: 'error',
           code: 'VEHICLE_INCLINATION',
           message: `${vehicle.name} supports ${vehicle.minInclination}°–${vehicle.maxInclination}° inclination.`,
         })
       }
-      if (vehicle.maxAltitude !== undefined && orbit.altitude > vehicle.maxAltitude) {
+      if (vehicle.maxAltitude !== undefined && ra > vehicle.maxAltitude) {
         issues.push({
           severity: 'error',
           code: 'VEHICLE_ALTITUDE',
-          message: `${vehicle.name} is limited to ${vehicle.maxAltitude} km circular orbits.`,
+          message: `${vehicle.name} can reach apogees up to ${km(vehicle.maxAltitude)}; this orbit's apogee is ${km(ra)}.`,
         })
       }
     }
 
-    if (orbit.type === 'SSO' && Math.abs(orbit.inclination - ssoInclination) > 0.2) {
+    if (orbitClass === 'MEO' || orbitClass === 'GEO' || orbitClass === 'HEO') {
       issues.push({
         severity: 'warning',
-        code: 'NOT_SUN_SYNCHRONOUS',
-        message: `Sun-synchronous inclination at ${orbit.altitude} km is ${ssoInclination.toFixed(2)}°; ${orbit.inclination.toFixed(2)}° will drift relative to the Sun.`,
-      })
-    }
-    if (orbit.type === 'POLAR' && Math.abs(orbit.inclination - 90) > 10) {
-      issues.push({
-        severity: 'warning',
-        code: 'NOT_POLAR',
-        message: `Polar orbits are typically within 80°–100° inclination.`,
+        code: 'HIGH_ORBIT',
+        message: `This is a ${orbitClass} orbit. The engine models a direct ascent; real missions reach it through a parking or transfer orbit, so treat windows as plane timing only.`,
       })
     }
 
-    const opportunities = planeGeometry(site.latitude, orbit.inclination, orbit.altitude).map((g) => ({
-      branch: g.branch,
-      azimuth: g.azimuth,
-      rotationalGain: g.rotationalGain,
-      withinCorridor: corridorMargin(g.azimuth, site) >= 0,
+    if (!sunSynchronous && rp < 2000 && Number.isFinite(ssoInclination) && Math.abs(rates.raanRate - SUN_RATE_DEG_DAY) < 0.3) {
+      issues.push({
+        severity: 'warning',
+        code: 'NEAR_SUN_SYNCHRONOUS',
+        message: `Nearly sun-synchronous: the node drifts ${rates.raanRate.toFixed(3)}°/day against the Sun's ${SUN_RATE_DEG_DAY.toFixed(4)}°/day. Use ${ssoInclination.toFixed(2)}° inclination for an exact SSO.`,
+      })
+    }
+
+    const epochGapDays = Math.abs(dateRange.start.getTime() - el.epoch.getTime()) / MS_PER_DAY
+    if (epochGapDays > STALE_EPOCH_DAYS) {
+      issues.push({
+        severity: 'warning',
+        code: 'EPOCH_DISTANT',
+        message: `The search starts ${Math.round(epochGapDays)} days from the TLE epoch. The plane is propagated with J2 only, so for real satellites use a fresh TLE.`,
+      })
+    }
+
+    const opportunities: LaunchOpportunity[] = this.geometries(input).map(({ geometry, insertion }) => ({
+      branch: geometry.branch,
+      azimuth: geometry.azimuth,
+      rotationalGain: geometry.rotationalGain,
+      withinCorridor: corridorMargin(geometry.azimuth, site) >= 0,
+      insertionAltitude: insertion.altitude,
+      insertionArgumentOfLatitude: insertion.argumentOfLatitude,
     }))
 
-    if (opportunities.length > 0 && !opportunities.some((o) => o.withinCorridor)) {
+    const allowed = opportunities.filter((o) => o.withinCorridor)
+    if (opportunities.length > 0 && allowed.length === 0) {
       issues.push({
         severity: 'error',
         code: 'AZIMUTH_RESTRICTED',
@@ -133,16 +196,74 @@ export class OrbitalEngine {
       })
     }
 
+    const offPerigee = allowed.find((o) => el.eccentricity > 0.001 && o.insertionAltitude > rp + 25)
+    if (offPerigee) {
+      issues.push({
+        severity: 'warning',
+        code: 'INSERTION_OFF_PERIGEE',
+        message: `On the ${offPerigee.branch} pass the vehicle inserts at ${km(offPerigee.insertionAltitude)}, ${km(offPerigee.insertionAltitude - rp)} above perigee. Set the argument of perigee to ${offPerigee.insertionArgumentOfLatitude.toFixed(1)}° to inject at perigee.`,
+      })
+    }
+
+    const period = anomalisticPeriod(el)
     return {
       feasible: !issues.some((i) => i.severity === 'error'),
       issues,
-      periodMinutes: orbitalPeriod(orbit.altitude) / 60,
-      velocityKmS: circularVelocity(orbit.altitude),
-      nodalPrecessionDegDay: nodalPrecession(orbit.altitude, orbit.inclination),
+      orbitClass,
+      semiMajorAxisKm: el.semiMajorAxis,
+      perigeeAltitudeKm: rp,
+      apogeeAltitudeKm: ra,
+      periodMinutes: period / 60,
+      revsPerDay: SECONDS_PER_DAY / period,
+      perigeeVelocityKmS: visVivaSpeed(el.semiMajorAxis, rp + EARTH_RADIUS_KM),
+      apogeeVelocityKmS: visVivaSpeed(el.semiMajorAxis, ra + EARTH_RADIUS_KM),
+      nodalPrecessionDegDay: rates.raanRate,
+      apsidalPrecessionDegDay: rates.argOfPerigeeRate,
       sunSynchronousInclination: ssoInclination,
-      groundTrackShiftDeg: groundTrackShift(orbit.altitude, orbit.inclination),
+      sunSynchronous,
+      ltan: ltanAt(el),
+      groundTrackShiftDeg: groundTrackShiftFor(el),
       opportunities,
     }
+  }
+
+  /**
+   * Design a target orbit for a launch from `site`: size and shape from perigee / apogee,
+   * and the argument of perigee chosen so the first allowed pass injects at perigee.
+   * The result always "crosses paths" with the site — every window launches into it.
+   */
+  designOrbit(params: {
+    site: LaunchSite
+    vehicle?: CalculationInput['vehicle']
+    epoch: Date
+    perigeeAltitude: number
+    apogeeAltitude: number
+    inclination: number
+    raan: number
+  }): OrbitalElements {
+    const { site, vehicle, epoch, inclination, raan } = params
+    const rp = EARTH_RADIUS_KM + Math.min(params.perigeeAltitude, params.apogeeAltitude)
+    const ra = EARTH_RADIUS_KM + Math.max(params.perigeeAltitude, params.apogeeAltitude)
+    let el: OrbitalElements = {
+      epoch,
+      semiMajorAxis: (rp + ra) / 2,
+      eccentricity: (ra - rp) / (ra + rp),
+      inclination,
+      raan: normalizeAngle(raan),
+      argOfPerigee: 0,
+      meanAnomaly: 0,
+    }
+    if (el.eccentricity < 1e-6) return el
+    const dateRange = { start: epoch, end: new Date(epoch.getTime() + MS_PER_DAY) }
+    // Insertion latitude depends weakly on the insertion altitude; two or three passes converge
+    for (let k = 0; k < 3; k++) {
+      const pass = this.geometries({ orbit: el, launchSite: site, vehicle, dateRange }).find(
+        ({ geometry }) => corridorMargin(geometry.azimuth, site) >= 0
+      )
+      if (!pass) break
+      el = { ...el, argOfPerigee: pass.insertion.argumentOfLatitude }
+    }
+    return el
   }
 
   /** Calculate all launch windows in the date range, sorted chronologically */
@@ -150,71 +271,91 @@ export class OrbitalEngine {
     const analysis = this.analyzeMission(input)
     if (!analysis.feasible) return []
 
-    const { orbit, vehicle, launchSite: site, dateRange, constraints } = input
-    const raanModel = this.raanModel(input)
-    const tolerance = constraints?.raanTolerance ?? DEFAULT_RAAN_TOLERANCE[orbit.type]
+    const { orbit: el, launchSite: site, dateRange, constraints } = input
+    const rate = secularRates(el).raanRate
+    const raanAt = (t: Date) => normalizeAngle(el.raan + (rate * (t.getTime() - el.epoch.getTime())) / MS_PER_DAY)
+    const tolerance = constraints?.raanTolerance ?? DEFAULT_RAAN_TOLERANCE[analysis.orbitClass]
     const halfWidthMs = (tolerance / EARTH_ROTATION_DEG_S) * 1000
-    const ascentSec = vehicle?.ascentDuration ?? 540
-
-    const geometries = planeGeometry(site.latitude, orbit.inclination, orbit.altitude).filter(
-      (g) => corridorMargin(g.azimuth, site) >= 0
-    )
 
     const windows: LaunchWindow[] = []
-    for (const geometry of geometries) {
-      let cursor = dateRange.start
+    for (const { geometry, insertion } of this.geometries(input)) {
+      if (corridorMargin(geometry.azimuth, site) < 0) continue
+      const ascentMs = (insertion.trajectory[insertion.trajectory.length - 1]?.t ?? 0) * 1000
+      let leadMs: number | undefined
+      // Start a little early: a lagging liftoff can fall after the range start even if its crossing does not
+      let cursor = new Date(dateRange.start.getTime() - 30 * 60_000)
       // Bounded loop: at most ~1 crossing per sidereal day per branch
       for (let guard = 0; guard < MAX_RANGE_DAYS + 2; guard++) {
-        const { time: optimal, periodMs } = nextPlaneCrossing(
-          cursor,
-          site.longitude,
-          geometry.nodeOffset,
-          raanModel.at,
-          raanModel.rate
-        )
+        const { time: crossing, periodMs } = nextPlaneCrossing(cursor, site.longitude, geometry.nodeOffset, raanAt, rate)
+        // Earth turns ~0.25°/min during the ascent, so the plane reached at insertion is offset from the
+        // plane the pad sat in at liftoff. Lead the liftoff by that offset so insertion lands in the target plane.
+        if (leadMs === undefined) {
+          const last = insertion.trajectory[insertion.trajectory.length - 1]!
+          const tIns = new Date(crossing.getTime() + ascentMs)
+          const fitted = raanThroughPoint(last.latitude, last.longitude, el.inclination, insertion.heading, tIns)
+          leadMs = (wrap180(fitted - raanAt(tIns)) / (EARTH_ROTATION_DEG_S - rate / SECONDS_PER_DAY)) * 1000
+        }
+        const optimal = new Date(crossing.getTime() - leadMs)
         if (optimal > dateRange.end) break
-        const window = this.buildWindow(input, geometry, optimal, halfWidthMs, ascentSec, raanModel.at)
+        cursor = new Date(crossing.getTime() + periodMs / 2)
+        if (optimal < dateRange.start) continue
+        const window = this.buildWindow(input, geometry, insertion, optimal, halfWidthMs, raanAt)
         if (window && this.passesConstraints(window, constraints)) windows.push(window)
-        cursor = new Date(optimal.getTime() + periodMs / 2)
       }
     }
 
     return windows.sort((a, b) => a.start.getTime() - b.start.getTime())
   }
 
-  /** RAAN of the target plane as a function of time */
-  private raanModel(input: CalculationInput): { at: (t: Date) => number; rate: number } {
-    const { orbit, dateRange } = input
-    if (orbit.type === 'SSO') {
-      const ltan = orbit.ltan ?? DEFAULT_LTAN
-      return {
-        at: (t) => normalizeAngle(meanSunRightAscension(t) + (ltan - 12) * 15),
-        rate: SUN_RATE_DEG_DAY,
-      }
+  /** Plane geometry and insertion point for each pass */
+  private geometries(input: CalculationInput): Array<{ geometry: PlaneGeometry; insertion: InsertionGeometry }> {
+    const { orbit: el, launchSite: site } = input
+    const speed = visVivaSpeed(el.semiMajorAxis, el.semiMajorAxis)
+    return planeGeometry(site.latitude, el.inclination, speed).map((geometry) => ({
+      geometry,
+      insertion: this.insertionGeometry(input, geometry),
+    }))
+  }
+
+  /**
+   * The ascent reaches the target plane at the end of the trajectory. Its argument of
+   * latitude u fixes the true anomaly ν = u − ω on the target ellipse, which sets the
+   * insertion altitude; the trajectory is re-solved for that altitude.
+   */
+  private insertionGeometry(input: CalculationInput, geometry: PlaneGeometry): InsertionGeometry {
+    const { orbit: el, launchSite: site, vehicle } = input
+    const ascentSec = vehicle?.ascentDuration ?? DEFAULT_ASCENT_SEC
+    let altitude = Math.max(MIN_PERIGEE_KM, perigeeAltitude(el))
+    let result: InsertionGeometry | undefined
+    for (let k = 0; k < 3; k++) {
+      const trajectory = ascentTrajectory(site, geometry.azimuth, ascentSec, altitude)
+      const last = trajectory[trajectory.length - 1]!
+      const prev = trajectory[trajectory.length - 2] ?? last
+      const heading: PassBranch = last.latitude >= prev.latitude ? 'ascending' : 'descending'
+      const u = argumentOfLatitudeAt(last.latitude, el.inclination, heading)
+      const trueAnomaly = normalizeAngle(u - el.argOfPerigee)
+      result = { trajectory, altitude, trueAnomaly, argumentOfLatitude: u, heading }
+      altitude = radiusAt(el, trueAnomaly) - EARTH_RADIUS_KM
     }
-    const rate = nodalPrecession(orbit.altitude, orbit.inclination)
-    const raan0 = orbit.raan ?? 0
-    const epoch = (orbit.raanEpoch ?? dateRange.start).getTime()
-    return {
-      at: (t) => normalizeAngle(raan0 + (rate * (t.getTime() - epoch)) / MS_PER_DAY),
-      rate,
-    }
+    // Final trajectory consistent with the converged altitude
+    const trajectory = ascentTrajectory(site, geometry.azimuth, ascentSec, altitude)
+    return { ...result!, trajectory, altitude }
   }
 
   private buildWindow(
     input: CalculationInput,
     geometry: PlaneGeometry,
+    insertion: InsertionGeometry,
     optimal: Date,
     halfWidthMs: number,
-    ascentSec: number,
     raanAt: (t: Date) => number
   ): LaunchWindow | null {
-    const { orbit, launchSite: site, weather: forecast } = input
-    const trajectory = ascentTrajectory(site, geometry.azimuth, ascentSec, orbit.altitude)
+    const { orbit: el, launchSite: site, weather: forecast } = input
+    const { trajectory } = insertion
     const last = trajectory[trajectory.length - 1]
     if (!last) return null
 
-    const insertionTime = new Date(optimal.getTime() + ascentSec * 1000)
+    const insertionTime = new Date(optimal.getTime() + last.t * 1000)
     const lighting = lightingAt(site, optimal, trajectory)
     const weather = weatherAt(site, optimal, forecast)
 
@@ -242,7 +383,23 @@ export class OrbitalEngine {
       weather,
       branch: geometry.branch,
       azimuth: Math.round(geometry.azimuth * 100) / 100,
-      insertion: { time: insertionTime, latitude: last.latitude, longitude: last.longitude },
+      insertion: {
+        time: insertionTime,
+        latitude: last.latitude,
+        longitude: last.longitude,
+        altitude: insertion.altitude,
+        trueAnomaly: insertion.trueAnomaly,
+      },
+      // As flown: the plane through the insertion point, with the target size, shape and perigee
+      orbit: {
+        epoch: insertionTime,
+        semiMajorAxis: el.semiMajorAxis,
+        eccentricity: el.eccentricity,
+        inclination: el.inclination,
+        raan: raanThroughPoint(last.latitude, last.longitude, el.inclination, insertion.heading, insertionTime),
+        argOfPerigee: el.argOfPerigee,
+        meanAnomaly: trueToMeanAnomaly(insertion.trueAnomaly, el.eccentricity),
+      },
       lighting,
       visibilityRegions: visibilityRegions(optimal, trajectory, lighting),
       trajectory,

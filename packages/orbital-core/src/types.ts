@@ -1,7 +1,10 @@
 import { z } from 'zod'
 
-/** Target orbit family */
-export type OrbitType = 'LEO' | 'POLAR' | 'SSO'
+/** Orbit family the user chooses when designing a mission */
+export type OrbitFamily = 'LEO' | 'POLAR' | 'SSO'
+
+/** Orbit class inferred from the elements */
+export type OrbitClass = 'LEO' | 'POLAR' | 'SSO' | 'MEO' | 'GEO' | 'HEO'
 
 export type WeatherRisk = 'low' | 'medium' | 'high'
 
@@ -11,10 +14,32 @@ export type ClimateZone =
   | 'continental'
   | 'equatorial'
   | 'temperate-maritime'
+  | 'north-atlantic-coastal'
+
+/**
+ * Mean Keplerian elements of a single (possibly elliptical) orbit.
+ * Brouwer mean elements, propagated with two-body motion plus J2 secular rates.
+ * Usually obtained from a TLE via `tleToElements`.
+ */
+export interface OrbitalElements {
+  epoch: Date
+  /** km */
+  semiMajorAxis: number
+  /** 0 ≤ e < 1 */
+  eccentricity: number
+  /** deg */
+  inclination: number
+  /** Right ascension of the ascending node at epoch (deg) */
+  raan: number
+  /** Argument of perigee (deg) */
+  argOfPerigee: number
+  /** Mean anomaly at epoch (deg) */
+  meanAnomaly: number
+}
 
 /** Launch site */
 export interface LaunchSite {
-  /** Stable identifier, e.g. "KSC" */
+  /** Stable identifier, e.g. "SPACEPORT_NOVA_SCOTIA" */
   id?: string
   name: string
   latitude: number
@@ -27,6 +52,8 @@ export interface LaunchSite {
    */
   azimuthCorridors?: ReadonlyArray<readonly [number, number]>
   climate?: ClimateZone
+  /** First date orbital launches are expected to be possible; earlier searches are flagged */
+  operationalFrom?: Date
 }
 
 /** Launch vehicle */
@@ -37,30 +64,10 @@ export interface VehicleParams {
   ascentDuration: number
   minInclination: number
   maxInclination: number
-  /** Maximum circular-orbit altitude for the payload class (km) */
+  /** Maximum apogee altitude for the payload class (km) */
   maxAltitude?: number
   /** Home launch site (informational) */
   launchSite?: LaunchSite
-}
-
-/** Target orbital parameters (circular orbits) */
-export interface OrbitalParams {
-  type: OrbitType
-  /** km */
-  altitude: number
-  /** deg */
-  inclination: number
-  /**
-   * Target right ascension of the ascending node (deg) at `raanEpoch`.
-   * Used for LEO/POLAR (e.g. rendezvous with an existing plane). Defaults to 0.
-   */
-  raan?: number
-  /** Epoch for `raan`; defaults to the start of the date range */
-  raanEpoch?: Date
-  /** Local time of the ascending node for SSO (decimal hours, default 22.5 → 10:30 descending) */
-  ltan?: number
-  argOfPerigee?: number
-  eccentricity?: number
 }
 
 /** Hourly weather sample (forecast or climatology) */
@@ -139,6 +146,8 @@ export interface ScoreBreakdown {
   viewing: number
 }
 
+export type PassBranch = 'ascending' | 'descending'
+
 /** Launch window result */
 export interface LaunchWindow {
   id: string
@@ -155,10 +164,20 @@ export interface LaunchWindow {
   scoreBreakdown: ScoreBreakdown
   weatherRisk: WeatherRisk
   weather: WeatherAssessment
-  branch: 'ascending' | 'descending'
+  branch: PassBranch
   /** Flight azimuth relative to Earth (deg) */
   azimuth: number
-  insertion: { time: Date; latitude: number; longitude: number }
+  insertion: {
+    time: Date
+    latitude: number
+    longitude: number
+    /** km */
+    altitude: number
+    /** Position on the ellipse at insertion (deg, 0 = perigee) */
+    trueAnomaly: number
+  }
+  /** As-flown mean elements at insertion (epoch = insertion time) */
+  orbit: OrbitalElements
   lighting: LightingInfo
   visibilityRegions: GeoRegion[]
   trajectory: TrajectoryPoint[]
@@ -176,7 +195,11 @@ export interface CalculationConstraints {
 
 /** Calculation inputs */
 export interface CalculationInput {
-  orbit: OrbitalParams
+  /**
+   * The single target orbit. The plane (RAAN) is propagated from `orbit.epoch`
+   * with J2; size, shape, inclination and argument of perigee are injection targets.
+   */
+  orbit: OrbitalElements
   vehicle?: VehicleParams
   dateRange: { start: Date; end: Date }
   launchSite: LaunchSite
@@ -191,38 +214,54 @@ export interface FeasibilityIssue {
   message: string
 }
 
+export interface LaunchOpportunity {
+  branch: PassBranch
+  /** Earth-relative flight azimuth (deg) */
+  azimuth: number
+  rotationalGain: number
+  withinCorridor: boolean
+  /** Altitude at insertion for this pass given the target argument of perigee (km) */
+  insertionAltitude: number
+  /** Argument of latitude at insertion (deg) — the argument of perigee that would inject at perigee */
+  insertionArgumentOfLatitude: number
+}
+
 /** Pre-computation mission analysis */
 export interface MissionAnalysis {
   feasible: boolean
   issues: FeasibilityIssue[]
+  orbitClass: OrbitClass
+  semiMajorAxisKm: number
+  perigeeAltitudeKm: number
+  apogeeAltitudeKm: number
+  /** Anomalistic period including J2 (min) */
   periodMinutes: number
-  velocityKmS: number
+  revsPerDay: number
+  perigeeVelocityKmS: number
+  apogeeVelocityKmS: number
   nodalPrecessionDegDay: number
+  apsidalPrecessionDegDay: number
+  /** Inclination that would make this a, e sun-synchronous (deg) */
   sunSynchronousInclination: number
+  sunSynchronous: boolean
+  /** Local time of the ascending node at the orbit epoch (h) */
+  ltan: number
   groundTrackShiftDeg: number
-  opportunities: Array<{
-    branch: 'ascending' | 'descending'
-    azimuth: number
-    rotationalGain: number
-    withinCorridor: boolean
-  }>
+  opportunities: LaunchOpportunity[]
 }
 
 // ---------------------------------------------------------------------------
 // Zod schemas for validating untrusted input (e.g. from URLs or files)
 // ---------------------------------------------------------------------------
 
-export const OrbitTypeSchema = z.enum(['LEO', 'POLAR', 'SSO'])
-
-export const OrbitalParamsSchema = z.object({
-  type: OrbitTypeSchema,
-  altitude: z.number().min(160).max(2000),
+export const OrbitalElementsSchema = z.object({
+  epoch: z.date(),
+  semiMajorAxis: z.number().min(6378.137 + 100).max(500_000),
+  eccentricity: z.number().min(0).lt(1),
   inclination: z.number().min(0).max(180),
-  raan: z.number().min(0).max(360).optional(),
-  raanEpoch: z.date().optional(),
-  ltan: z.number().min(0).max(24).optional(),
-  argOfPerigee: z.number().min(0).max(360).optional(),
-  eccentricity: z.number().min(0).max(0.1).optional(),
+  raan: z.number().min(0).max(360),
+  argOfPerigee: z.number().min(0).max(360),
+  meanAnomaly: z.number().min(0).max(360),
 })
 
 export const LaunchSiteSchema = z.object({
@@ -233,8 +272,16 @@ export const LaunchSiteSchema = z.object({
   altitude: z.number().min(0),
   azimuthCorridors: z.array(z.tuple([z.number(), z.number()])).optional(),
   climate: z
-    .enum(['subtropical-coastal', 'mediterranean-coastal', 'continental', 'equatorial', 'temperate-maritime'])
+    .enum([
+      'subtropical-coastal',
+      'mediterranean-coastal',
+      'continental',
+      'equatorial',
+      'temperate-maritime',
+      'north-atlantic-coastal',
+    ])
     .optional(),
+  operationalFrom: z.date().optional(),
 })
 
 export const VehicleParamsSchema = z.object({
@@ -249,7 +296,7 @@ export const VehicleParamsSchema = z.object({
 
 export const CalculationInputSchema = z
   .object({
-    orbit: OrbitalParamsSchema,
+    orbit: OrbitalElementsSchema,
     vehicle: VehicleParamsSchema.optional(),
     dateRange: z.object({ start: z.date(), end: z.date() }),
     launchSite: LaunchSiteSchema,

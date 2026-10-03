@@ -2,7 +2,7 @@ import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '@/utils/cn'
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLElement>) {
-  return <section className={cn('rounded-xl border bg-card/80 backdrop-blur-sm shadow-sm', className)} {...props} />
+  return <section className={cn('glass-panel rounded-xl transition-shadow duration-300 hover:shadow-[0_0_0_1px_hsl(199_89%_56%/0.12),0_24px_48px_-24px_rgb(0_0_0/0.8)]', className)} {...props} />
 }
 
 interface CardHeaderProps {

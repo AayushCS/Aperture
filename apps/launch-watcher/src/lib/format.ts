@@ -31,6 +31,11 @@ export const fmt = {
   utcDate: (d: Date) => utcDate.format(d),
   local: (d: Date) => localDateTime.format(d),
   deg: (v: number, digits = 1) => `${v.toFixed(digits)}°`,
+  /** Angle in [0, 360) that never prints as "360.0°" after rounding */
+  angle: (v: number, digits = 1) => {
+    const r = Number((((v % 360) + 360) % 360).toFixed(digits))
+    return `${(r >= 360 ? 0 : r).toFixed(digits)}°`
+  },
   km: (v: number) => `${Math.round(v).toLocaleString()} km`,
   pct: (v: number) => `${Math.round(v * 100)}%`,
   lat: (v: number) => `${Math.abs(v).toFixed(2)}°${v >= 0 ? 'N' : 'S'}`,

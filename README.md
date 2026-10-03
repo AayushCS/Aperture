@@ -1,9 +1,11 @@
 # Aperture
 
-Launch window planning for LEO, polar and sun-synchronous missions — an orbital mechanics engine plus a public "Launch Watch" dashboard.
+Launch window planning from **Spaceport Nova Scotia** (Canso, NS) into **one target orbit you design** (LEO, polar or sun-synchronous, circular or elliptical). The app outputs that orbit as a single TLE — the orbit you get by launching from Canso — plus a "Launch Watch" dashboard.
 
-- **Orbital Architect** (`packages/orbital-core`): solves for the instants when Earth's rotation carries a launch site through the target orbital plane, then applies vehicle limits, range-safety azimuth corridors, lighting and weather constraints, and scores each window.
-- **Launch Watcher** (`apps/launch-watcher`): live countdown, Green/Yellow/Red weather go/no-go, ascent viewing map, window planner and an animated orbit globe.
+- **Orbital Architect** (`packages/orbital-core`): parses/validates TLEs, propagates one elliptical orbit (two-body + J2 secular), solves for the instants when Earth's rotation carries the pad through that orbit's plane, places the insertion point on the ellipse, then applies vehicle limits, the over-ocean azimuth corridor, lighting and weather, and scores each window.
+- **Launch Watcher** (`apps/launch-watcher`): LEO / Polar / SSO orbit designer, generated TLE (copy / download), countdown, Green/Yellow/Red weather go/no-go, ascent viewing map and an interactive 3D-orbit globe.
+
+The default mission is **APERTURE-1**, a hypothetical 600 km circular sun-synchronous orbit (10:30 descending node), searched from 1 Dec 2027 — the spaceport's targeted first orbital season. Generated TLEs use catalog number 99901 (unassigned range).
 
 ## Quick start
 
@@ -24,37 +26,44 @@ bun run dev         # http://localhost:3000
 
 ## Using the app
 
-- **Launch Watch** (`/`) — countdown to the next window (switches to "closes in" while the window is open), weather at T-0 against launch-commit criteria, a map of the ascent ground path with viewing zones, and the upcoming windows.
-- **Window Planner** (`/planner`) — edit the mission (orbit family, altitude, inclination, RAAN or LTAN, site, vehicle, date span, constraints). Results recalculate instantly, feasibility problems are explained, and windows can be exported to CSV. The profile is saved in `localStorage`.
-- **Orbit** (`/orbit`) — orthographic globe showing ascent, insertion and the first three orbits of ground track, with day/night terminator and coverage footprint.
+- **Launch Watch** (`/`) — countdown, weather at T-0, mission-orbit (opens the TLE), site and orbit-type widgets, ascent viewing map and upcoming windows.
+- **Window Planner** (`/planner`) — pick LEO / Polar / Sun-sync. Each starts circular at a default altitude (LEO 500 km, Polar 700 km, SSO 600 km); **Advanced** opens an altitude slider bounded per family (300–1200 / 500–1000 / 500–900 km) and an optional apogee for elliptical orbits. Then set inclination + RAAN (LEO/polar) or local time of the node (SSO; inclination is set automatically). The argument of perigee is placed where the ascent from Canso reaches orbit, so insertion is at perigee. The generated TLE is the as-flown orbit for the selected window (epoch = insertion). Windows export to CSV; state is saved in `localStorage`.
+- **Orbit** (`/orbit`) — drag/zoom/fullscreen globe with the orbit drawn as a 3D ellipse, configurable layers and number of ground-track revolutions (one orbit; later revolutions fade because Earth turns under it), and an in-plane ellipse diagram.
 
 Weather comes from the [Open-Meteo](https://open-meteo.com/) 16-day hourly forecast (free, no key; only the public site coordinates are sent). Beyond the forecast horizon, or if the request fails, a deterministic per-site climatology model is used. The data source is always labelled in the UI.
 
 ## Engine API
 
 ```ts
-import { orbitalEngine, COMMON_LAUNCH_SITES, COMMON_VEHICLES } from '@aperture/orbital-core'
+import { orbitalEngine, orbitFromTle, COMMON_LAUNCH_SITES, COMMON_VEHICLES, HYPOTHETICAL_MISSION_TLE } from '@aperture/orbital-core'
 
+const site = COMMON_LAUNCH_SITES.SPACEPORT_NOVA_SCOTIA
+const orbit = orbitalEngine.designOrbit({            // or orbitFromTle(HYPOTHETICAL_MISSION_TLE)
+  site, vehicle: COMMON_VEHICLES.SPECTRUM, epoch: new Date('2027-12-01'),
+  perigeeAltitude: 500, apogeeAltitude: 800, inclination: 97.98, raan: 44.3,
+})
 const input = {
-  orbit: { type: 'LEO', altitude: 420, inclination: 51.64, raan: 120, raanEpoch: new Date('2026-01-01') },
-  launchSite: COMMON_LAUNCH_SITES.KSC,
-  vehicle: COMMON_VEHICLES.FALCON_9,
-  dateRange: { start: new Date(), end: new Date(Date.now() + 7 * 86_400_000) },
+  orbit,
+  launchSite: site,
+  vehicle: COMMON_VEHICLES.SPECTRUM,
+  dateRange: { start: new Date('2027-12-01'), end: new Date('2027-12-15') },
   constraints: { maxWeatherRisk: 'medium' },
-  // weather: HourlyWeather[]  — optional forecast; climatology otherwise
-} as const
+}
 
-const analysis = orbitalEngine.analyzeMission(input)  // feasibility issues, period, J2 drift, azimuths
+const analysis = orbitalEngine.analyzeMission(input)  // class, perigee/apogee, J2 rates, LTAN, azimuths, issues
 const windows = orbitalEngine.calculateLaunchWindows(input)
-// windows[i]: start / optimal / end, azimuth, branch, weather (factors + risk),
-//             lighting, insertion point, trajectory, visibilityRegions, quality + scoreBreakdown
+// windows[i]: start / optimal / end, azimuth, insertion (altitude, true anomaly), as-flown `orbit`
+//             (→ elementsToTle / tleToText for the generated TLE),
+//             weather, lighting, trajectory, visibilityRegions, quality + scoreBreakdown
 ```
 
-For SSO missions set `orbit.ltan` (local time of ascending node, hours); the plane is tied to the Sun's right ascension. `CalculationInputSchema` (Zod) validates untrusted input.
+TLE helpers: `parseTle` (non-throwing, returns errors), `formatTle` / `tleToText` (checksums), `tleToElements` / `elementsToTle` (Kozai ↔ Brouwer). Propagation: `propagate`, `groundTrack`, `orbitRing`. `CalculationInputSchema` (Zod) validates untrusted input.
 
 ## Model and limits
 
-Circular orbits; two-body motion with J2 secular nodal precession; IAU-1982 GMST; low-precision solar ephemeris (~0.01°). Windows are centred on the in-plane time with width set by an allowable RAAN error (default ±2° LEO, ±1° polar, ±0.5° SSO). The ascent is a smooth great-circle profile, not a simulated trajectory, and the azimuth corridors and weather limits are representative, not official range rules. Results are for planning and education, **not operational use**.
+One elliptical orbit from TLE mean elements, propagated with two-body motion plus J2 secular rates (node, perigee, mean anomaly) — not full SGP4, so generated TLEs are planning-grade, not SGP4-fitted. IAU-1982 GMST; low-precision solar ephemeris (~0.01°). Liftoff leads the pad's plane crossing so that insertion (after Earth turns during ascent) lands in the target plane. Window width comes from an allowable RAAN error (±2° LEO, ±1° polar/HEO, ±0.5° SSO). The ascent is a smooth great-circle profile; MEO/GEO/HEO are flagged since real missions use transfer orbits.
+
+Spaceport Nova Scotia's corridor (88°–200°, i.e. roughly 45°–98° inclinations over open ocean), vehicle figures and North-Atlantic climatology are representative, not official. Orbital operations are assumed from October 2027; earlier searches are flagged as hypothetical. Planning and education only, **not operational use**.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for design details.
 
