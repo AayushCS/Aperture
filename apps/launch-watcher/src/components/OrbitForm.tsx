@@ -74,7 +74,9 @@ export default function OrbitForm({ analysis }: { analysis: MissionAnalysis }) {
   const limits = ORBIT_LIMITS[mission.orbitType]
   const altRange = ORBIT_ALTITUDE[mission.orbitType]
   const isDefault = mission.perigee === altRange.defaultKm && mission.apogee === altRange.defaultKm
-  const [advancedAlt, setAdvancedAlt] = useState(!isDefault)
+  const elliptical = mission.apogee !== mission.perigee
+  // As on testing: altitude is a single default value; the slider lives under "Advanced"
+  const [advancedAlt, setAdvancedAlt] = useState(false)
 
   return (
     <div className="space-y-6">
@@ -84,33 +86,49 @@ export default function OrbitForm({ analysis }: { analysis: MissionAnalysis }) {
           {advancedAlt ? (
             <div className="grid gap-5 sm:grid-cols-2">
               <SliderField
-                id="perigee"
-                label="Perigee altitude"
+                id="altitude"
+                label={elliptical ? 'Perigee altitude' : 'Altitude'}
                 unit="km"
                 min={altRange.min}
                 max={altRange.max}
-                step={5}
+                step={10}
                 value={mission.perigee}
-                onChange={(v) => update({ perigee: v, apogee: Math.max(v, mission.apogee) })}
-                hint={`Lowest point — the vehicle injects here · default ${altRange.defaultKm} km`}
+                onChange={(v) => update(elliptical ? { perigee: v, apogee: Math.max(v, mission.apogee) } : { perigee: v, apogee: v })}
+                hint={`Default for ${FAMILY_INFO[mission.orbitType].label}: ${altRange.defaultKm} km`}
               />
-              <SliderField
-                id="apogee"
-                label="Apogee altitude"
-                unit="km"
-                min={altRange.min}
-                max={altRange.max}
-                step={5}
-                value={mission.apogee}
-                onChange={(v) => update({ apogee: v, perigee: Math.min(v, mission.perigee) })}
-                hint={mission.apogee === mission.perigee ? 'Equal to perigee → circular' : `Elliptical, e = ${((mission.apogee - mission.perigee) / (mission.apogee + mission.perigee + 2 * 6378.137)).toFixed(4)}`}
-              />
+              {elliptical ? (
+                <SliderField
+                  id="apogee"
+                  label="Apogee altitude"
+                  unit="km"
+                  min={altRange.min}
+                  max={altRange.max}
+                  step={10}
+                  value={mission.apogee}
+                  onChange={(v) => update({ apogee: v, perigee: Math.min(v, mission.perigee) })}
+                  hint={
+                    <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => update({ apogee: mission.perigee })}>
+                      Make circular
+                    </button>
+                  }
+                />
+              ) : (
+                <div className="flex items-end pb-1">
+                  <button
+                    type="button"
+                    className="text-xs text-primary underline-offset-2 hover:underline"
+                    onClick={() => update({ apogee: Math.min(altRange.max, mission.perigee + 100) })}
+                  >
+                    Make elliptical (set an apogee)
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div>
               <span className="text-xs font-medium text-muted-foreground">Altitude</span>
               <p className="text-sm">
-                {mission.perigee === mission.apogee ? `${mission.perigee} km` : `${mission.perigee} × ${mission.apogee} km`}{' '}
+                {elliptical ? `${mission.perigee} × ${mission.apogee} km` : `${mission.perigee} km`}{' '}
                 <span className="text-xs text-muted-foreground">{isDefault ? '(default)' : '(custom)'}</span>
               </p>
             </div>

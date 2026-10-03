@@ -5,7 +5,7 @@ Launch window planning from **Spaceport Nova Scotia** (Canso, NS) into **one tar
 - **Orbital Architect** (`packages/orbital-core`): parses/validates TLEs, propagates one elliptical orbit (two-body + J2 secular), solves for the instants when Earth's rotation carries the pad through that orbit's plane, places the insertion point on the ellipse, then applies vehicle limits, the over-ocean azimuth corridor, lighting and weather, and scores each window.
 - **Launch Watcher** (`apps/launch-watcher`): LEO / Polar / SSO orbit designer, generated TLE (copy / download), countdown, Green/Yellow/Red weather go/no-go, ascent viewing map and an interactive 3D-orbit globe.
 
-The default mission is **APERTURE-1**, a hypothetical 500 × 800 km sun-synchronous orbit (10:30 descending node), searched from 1 Dec 2027 — the spaceport's targeted first orbital season. Generated TLEs use catalog number 99901 (unassigned range).
+The default mission is **APERTURE-1**, a hypothetical 600 km circular sun-synchronous orbit (10:30 descending node), searched from 1 Dec 2027 — the spaceport's targeted first orbital season. Generated TLEs use catalog number 99901 (unassigned range).
 
 ## Quick start
 
@@ -27,7 +27,7 @@ bun run dev         # http://localhost:3000
 ## Using the app
 
 - **Launch Watch** (`/`) — countdown, weather at T-0, mission-orbit (opens the TLE), site and orbit-type widgets, ascent viewing map and upcoming windows.
-- **Window Planner** (`/planner`) — pick LEO / Polar / Sun-sync, set perigee and apogee, then inclination + RAAN (LEO/polar) or local time of the node (SSO; inclination is set automatically). The argument of perigee is placed where the ascent from Canso reaches orbit, so insertion is at perigee. The generated TLE is the as-flown orbit for the selected window (epoch = insertion). Windows export to CSV; state is saved in `localStorage`.
+- **Window Planner** (`/planner`) — pick LEO / Polar / Sun-sync. Each starts circular at a default altitude (LEO 500 km, Polar 700 km, SSO 600 km); **Advanced** opens an altitude slider bounded per family (300–1200 / 500–1000 / 500–900 km) and an optional apogee for elliptical orbits. Then set inclination + RAAN (LEO/polar) or local time of the node (SSO; inclination is set automatically). The argument of perigee is placed where the ascent from Canso reaches orbit, so insertion is at perigee. The generated TLE is the as-flown orbit for the selected window (epoch = insertion). Windows export to CSV; state is saved in `localStorage`.
 - **Orbit** (`/orbit`) — drag/zoom/fullscreen globe with the orbit drawn as a 3D ellipse, configurable layers and number of ground-track revolutions (one orbit; later revolutions fade because Earth turns under it), and an in-plane ellipse diagram.
 
 Weather comes from the [Open-Meteo](https://open-meteo.com/) 16-day hourly forecast (free, no key; only the public site coordinates are sent). Beyond the forecast horizon, or if the request fails, a deterministic per-site climatology model is used. The data source is always labelled in the UI.

@@ -134,8 +134,9 @@ export const useMissionStore = create<MissionState>()(
       reset: () => set({ mission: DEFAULT_MISSION, globe: DEFAULT_GLOBE, selectedWindowId: null }),
     }),
     {
-      name: 'aperture.mission.v4',
-      version: 4,
+      // v5: per-orbit default altitudes from testing — older saved missions start fresh
+      name: 'aperture.mission.v5',
+      version: 5,
       partialize: (s) => ({ mission: s.mission, globe: s.globe }),
       // Guard against stale or tampered storage
       merge: (persisted, current) => {
