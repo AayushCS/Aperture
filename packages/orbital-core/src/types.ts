@@ -54,6 +54,8 @@ export interface LaunchSite {
   climate?: ClimateZone
   /** First date orbital launches are expected to be possible; earlier searches are flagged */
   operationalFrom?: Date
+  /** IANA time zone for local times at the site, e.g. "America/Halifax" */
+  timeZone?: string
 }
 
 /** Launch vehicle */
@@ -282,6 +284,7 @@ export const LaunchSiteSchema = z.object({
     ])
     .optional(),
   operationalFrom: z.date().optional(),
+  timeZone: z.string().optional(),
 })
 
 export const VehicleParamsSchema = z.object({

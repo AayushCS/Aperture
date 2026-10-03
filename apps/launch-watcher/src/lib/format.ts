@@ -25,7 +25,25 @@ const localDateTime = new Intl.DateTimeFormat(undefined, {
   timeZoneName: 'short',
 })
 
+const zonedFormatters = new Map<string, Intl.DateTimeFormat>()
+/** "09:30" and "AST" for an instant in an IANA time zone */
+function zonedParts(d: Date, timeZone: string): { time: string; zone: string } {
+  let f = zonedFormatters.get(timeZone)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' })
+    zonedFormatters.set(timeZone, f)
+  }
+  // Round to the nearest minute (Intl truncates seconds)
+  const parts = f.formatToParts(new Date(Math.round(d.getTime() / 60_000) * 60_000))
+  const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? ''
+  return { time: `${get('hour')}:${get('minute')}`, zone: get('timeZoneName') }
+}
+
 export const fmt = {
+  /** Wall-clock time in a zone, e.g. "09:30" */
+  zonedTime: (d: Date, timeZone: string) => zonedParts(d, timeZone).time,
+  /** Zone abbreviation at an instant, e.g. "AST" / "ADT" */
+  zoneName: (d: Date, timeZone: string) => zonedParts(d, timeZone).zone,
   utcDateTime: (d: Date) => `${utcDateTime.format(d)} UTC`,
   utcTime: (d: Date) => `${utcTime.format(d)} UTC`,
   utcDate: (d: Date) => utcDate.format(d),

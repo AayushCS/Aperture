@@ -19,7 +19,8 @@ import { RiskBadge, Stat } from '@/components/ui/Badge'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Field, Segmented, inputClass } from '@/components/ui/Form'
 import { CLASS_LABEL, hhmm } from '@/lib/orbitStats'
-import { fmt, isoDay } from '@/lib/format'
+import { fmt } from '@/lib/format'
+import { SEARCH_LIMIT_DAYS, clampSpanDays, maxSpanDays } from '@/lib/searchRange'
 
 const RISK_OPTIONS: ReadonlyArray<{ value: WeatherRisk; label: string }> = [
   { value: 'low', label: 'Go only' },
@@ -27,7 +28,7 @@ const RISK_OPTIONS: ReadonlyArray<{ value: WeatherRisk; label: string }> = [
   { value: 'high', label: 'Any' },
 ]
 
-const SPAN_OPTIONS = [3, 7, 14, 30, 60]
+const SPAN_OPTIONS = [3, 7, 14, SEARCH_LIMIT_DAYS]
 
 function exportCsv(windows: readonly LaunchWindow[], name: string, screens: Record<string, ConjunctionScreen>) {
   const header = ['window_open_utc', 't0_utc', 'window_close_utc', 'duration_s', 'azimuth_deg', 'branch', 'insertion_alt_km', 'lighting', 'weather_risk', 'weather_violation_prob', 'weather_source', 'score', 'conjunction_screen']
@@ -62,6 +63,11 @@ export default function LaunchPlanner() {
   const { mission, analysis, windows, focus, vehicle, orbit, screening, screeningAltitude } = plan
   const { update, selectWindow, reset, selectedWindowId } = useMissionStore()
   const goCount = windows.filter((w) => w.weatherRisk === 'low').length
+  // Spans that keep start + span within the forecast; the current (clamped) span is always listed
+  const now = new Date()
+  const maxSpan = maxSpanDays(mission.startDate, now, plan.site.timeZone!)
+  const span = clampSpanDays(mission.startDate, mission.spanDays, now, plan.site.timeZone!)
+  const spanOptions = [...new Set([...SPAN_OPTIONS.filter((d) => d < maxSpan), maxSpan, span])].sort((a, b) => a - b)
 
   return (
     <div className="space-y-6">
@@ -81,7 +87,7 @@ export default function LaunchPlanner() {
           <Card className="animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
             <CardHeader icon={<Orbit />} title="Target orbit" description="Choose the orbit type and shape. It is designed to inject at perigee from Canso." />
             <CardBody>
-              <OrbitForm analysis={analysis} />
+              <OrbitForm analysis={analysis} orbit={plan.orbit} plane={plan.plane} />
             </CardBody>
           </Card>
 
@@ -108,14 +114,11 @@ export default function LaunchPlanner() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Search from (UTC)" htmlFor="start" hint={mission.startDate ? undefined : 'Defaults to now'}>
-                  <input id="start" type="date" className={inputClass} value={mission.startDate || isoDay(new Date())} onChange={(e) => update({ startDate: e.target.value })} />
-                </Field>
-                <Field label="Search span" htmlFor="span">
-                  <select id="span" className={inputClass} value={mission.spanDays} onChange={(e) => update({ spanDays: Number(e.target.value) })}>
-                    {SPAN_OPTIONS.map((d) => (
+                <Field label="Search span" htmlFor="span" hint={`Limited to ${SEARCH_LIMIT_DAYS} days: the length of the weather forecast`}>
+                  <select id="span" className={inputClass} value={span} onChange={(e) => update({ spanDays: Number(e.target.value) })}>
+                    {spanOptions.map((d) => (
                       <option key={d} value={d}>
-                        {d} days
+                        {d} {d === 1 ? 'day' : 'days'}
                       </option>
                     ))}
                   </select>

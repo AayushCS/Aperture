@@ -3,6 +3,8 @@ import {
   COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
   HYPOTHETICAL_MISSION_TLE,
+  ORBIT_ALTITUDE,
+  ORBIT_PLANE,
   OrbitalEngine,
   CalculationInputSchema,
   EARTH_RADIUS_KM,
@@ -16,6 +18,7 @@ import {
   corridorMargin,
   degToRad,
   destinationPoint,
+  elementsAt,
   elementsToTle,
   formatTle,
   gmst,
@@ -23,6 +26,9 @@ import {
   keplerianToCartesian,
   kozaiToSemiMajorAxis,
   localSolarTime,
+  zonedDate,
+  zonedTimeToUtc,
+  maxApogeeAltitude,
   ltanAt,
   meanSunRightAscension,
   orbitTraffic,
@@ -40,6 +46,7 @@ import {
   parseTle,
   perigeeAltitude,
   planeGeometry,
+  secularRates,
   propagate,
   raanForLtan,
   radToDeg,
@@ -50,6 +57,7 @@ import {
   sunElevation,
   sunPosition,
   sunSynchronousInclination,
+  sunSynchronousInclinationFor,
   tleChecksum,
   tleToElements,
   tleToText,
@@ -720,4 +728,79 @@ describe('conjunction screen', () => {
     expect(other.closest!.thresholdKm).toBe(25)
     expect(other.closest!.distanceKm).toBeGreaterThan(1000)
   })
+})
+
+describe('target orbit ranges and fixed planes', () => {
+  test('a and e come from perigee and apogee', () => {
+    const { semiMajorAxis, eccentricity } = shapeFromApsides(600, 800)
+    expect(semiMajorAxis).toBeCloseTo(6378.137 + (600 + 800) / 2, 9)
+    expect(eccentricity).toBeCloseTo((800 - 600) / (2 * 6378.137 + 600 + 800), 12)
+    expect(shapeFromApsides(690, 690).eccentricity).toBe(0)
+  })
+
+  test('J2 drift and SSO inclination use the eccentricity, not just a', () => {
+    const { semiMajorAxis: a, eccentricity: e } = shapeFromApsides(500, 900)
+    expect(e).toBeGreaterThan(0.02)
+    // p = a(1 − e²) shrinks with e, so the node regresses faster and SSO needs slightly less inclination (|cos i| smaller)
+    expect(Math.abs(secularRates({ semiMajorAxis: a, eccentricity: e, inclination: 51.6 }).raanRate)).toBeGreaterThan(
+      Math.abs(secularRates({ semiMajorAxis: a, eccentricity: 0, inclination: 51.6 }).raanRate)
+    )
+    expect(sunSynchronousInclinationFor(a, e)).toBeLessThan(sunSynchronousInclinationFor(a, 0))
+  })
+
+  test('apogee ceilings per family', () => {
+    expect(maxApogeeAltitude('LEO', 500)).toBe(2000)
+    expect(maxApogeeAltitude('POLAR', 900)).toBe(2000)
+    expect(maxApogeeAltitude('SSO', 690)).toBe(890)
+    expect(ORBIT_ALTITUDE.SSO).toMatchObject({ defaultKm: 690, min: 500, max: 800 })
+  })
+
+  test('SSO plane crosses the equator southbound at 10:00 mean solar time', () => {
+    const t = new Date('2027-12-01T00:00:00Z')
+    const el = { ...shapeFromApsides(690, 690), inclination: 98.15, epoch: t, raan: raanForLtan(ORBIT_PLANE.ssoDescendingNodeHours + 12, t), argOfPerigee: 0, meanAnomaly: 0 }
+    expect(ltanAt(el)).toBeCloseTo(22, 9)
+    expect(el.raan).toBeCloseTo(normalizeAngle(280.46 + 0.9856474 * (t.getTime() / 86_400_000 + 2440587.5 - 2451545) + 150), 9)
+  })
+})
+
+describe('LEO / polar plane chosen for a 09:30 local insertion', () => {
+  const engine = new OrbitalEngine()
+  const site = COMMON_LAUNCH_SITES.SPACEPORT_NOVA_SCOTIA
+  const vehicle = COMMON_VEHICLES.SPECTRUM
+  const tz = site.timeZone
+
+  test('local time conversion follows Halifax daylight saving', () => {
+    expect(zonedTimeToUtc('2026-10-04', '09:30', tz).toISOString()).toBe('2026-10-04T12:30:00.000Z') // ADT, UTC−3
+    expect(zonedTimeToUtc('2027-12-01', '09:30', tz).toISOString()).toBe('2027-12-01T13:30:00.000Z') // AST, UTC−4
+    expect(zonedDate(new Date('2027-12-01T00:00:00Z'), tz)).toBe('2027-11-30')
+  })
+
+  const cases = [
+    { family: 'LEO', inclination: site.latitude, perigee: 500 },
+    { family: 'LEO', inclination: 55, perigee: 500 },
+    { family: 'POLAR', inclination: 89, perigee: 600 },
+  ] as const
+  for (const date of ['2026-10-04', '2027-12-01']) {
+    for (const c of cases) {
+      test(`${date} ${c.family} ${c.inclination.toFixed(1)}°: first insertion within 1 min of ${ORBIT_PLANE.insertionLocalTime[c.family]}`, () => {
+        const epoch = new Date(`${date}T00:00:00Z`)
+        const insertionTime = zonedTimeToUtc(date, ORBIT_PLANE.insertionLocalTime[c.family], tz)
+        const orbit = engine.designOrbitForInsertion({
+          site,
+          vehicle,
+          epoch,
+          perigeeAltitude: c.perigee,
+          apogeeAltitude: c.perigee,
+          inclination: c.inclination,
+          insertionTime,
+        })
+        const input = { orbit, launchSite: site, vehicle, dateRange: { start: epoch, end: new Date(epoch.getTime() + 3 * 86_400_000) } }
+        expect(engine.analyzeMission(input).feasible).toBe(true)
+        const first = engine.calculateLaunchWindows(input)[0]!
+        expect(Math.abs(first.insertion.time.getTime() - insertionTime.getTime())).toBeLessThan(60_000)
+        expect(corridorMargin(first.azimuth, site)).toBeGreaterThanOrEqual(0)
+        expect((first.insertion.time.getTime() - first.optimal.getTime()) / 1000).toBeCloseTo(vehicle.ascentDuration, 0)
+      })
+    }
+  }
 })

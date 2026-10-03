@@ -266,6 +266,28 @@ export class OrbitalEngine {
     return el
   }
 
+  /**
+   * Design a target orbit (as `designOrbit`) whose plane puts orbit insertion on the first
+   * allowed pass at `insertionTime`. Ω is the plane through that pass's insertion point at
+   * that instant, referred back to `epoch` with J2; liftoff is one ascent duration earlier.
+   * Size, shape and argument of perigee do not depend on Ω, so they are designed first.
+   */
+  designOrbitForInsertion(
+    params: Omit<Parameters<OrbitalEngine['designOrbit']>[0], 'raan'> & { insertionTime: Date }
+  ): OrbitalElements {
+    const { insertionTime, ...design } = params
+    const shaped = this.designOrbit({ ...design, raan: 0 })
+    const dateRange = { start: design.epoch, end: new Date(design.epoch.getTime() + MS_PER_DAY) }
+    const pass = this.geometries({ orbit: shaped, launchSite: design.site, vehicle: design.vehicle, dateRange }).find(
+      ({ geometry }) => corridorMargin(geometry.azimuth, design.site) >= 0
+    )
+    if (!pass) return shaped // no allowed pass: analyzeMission reports it
+    const last = pass.insertion.trajectory[pass.insertion.trajectory.length - 1]!
+    const raanAtInsertion = raanThroughPoint(last.latitude, last.longitude, shaped.inclination, pass.insertion.heading, insertionTime)
+    const driftDeg = (secularRates(shaped).raanRate * (insertionTime.getTime() - design.epoch.getTime())) / MS_PER_DAY
+    return { ...shaped, raan: normalizeAngle(raanAtInsertion - driftDeg) }
+  }
+
   /** Calculate all launch windows in the date range, sorted chronologically */
   calculateLaunchWindows(input: CalculationInput): LaunchWindow[] {
     const analysis = this.analyzeMission(input)

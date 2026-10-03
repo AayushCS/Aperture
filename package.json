@@ -8,7 +8,7 @@
     "dev": "cd apps/launch-watcher && bun run dev",
     "data:satellites": "bun scripts/fetch-active-satellites.ts",
     "build": "cd packages/orbital-core && bun run build && cd ../../apps/launch-watcher && bun run build",
-    "test": "cd packages/orbital-core && bun test",
+    "test": "cd packages/orbital-core && bun test && cd ../../apps/launch-watcher && bun test",
     "type-check": "cd packages/orbital-core && bun run type-check && cd ../../apps/launch-watcher && bun run type-check",
     "check": "bun run type-check && bun run test && bun run build",
     "clean": "rm -rf packages/orbital-core/node_modules packages/orbital-core/dist apps/launch-watcher/node_modules apps/launch-watcher/dist"
