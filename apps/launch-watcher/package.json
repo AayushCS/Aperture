@@ -1,45 +1,44 @@
 {
   "name": "launch-watcher",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "dev": "bun run vite",
-    "build": "bun run tsc && bun run vite build",
-    "lint": "bun run eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "bun run vite preview",
-    "format": "bun run prettier --write \"src/**/*.{ts,tsx,css,md}\"",
-    "type-check": "bun run tsc --noEmit"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
   },
   "dependencies": {
-    "@aperture/orbital-core": "file:../../packages/orbital-core",
+    "@tanstack/react-query": "^5.48.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "d3-geo": "3.1.1",
+    "lucide-react": "^0.477.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
-    "@tanstack/react-query": "^5.48.3",
-    "zustand": "^5.0.3",
-    "date-fns": "^3.6.0",
-    "lucide-react": "^0.477.0",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
+    "sonner": "^1.7.2",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
-    "sonner": "^1.7.2"
+    "topojson-client": "3.1.0",
+    "world-atlas": "2.0.2",
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@types/d3-geo": "3.1.1",
+    "@types/geojson": "7946.0.16",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@typescript-eslint/eslint-plugin": "^8.18.1",
-    "@typescript-eslint/parser": "^8.18.1",
+    "@types/topojson-client": "3.1.5",
+    "@types/topojson-specification": "1.0.5",
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
-    "eslint": "^9.17.0",
-    "eslint-plugin-react-hooks": "^5.1.0",
-    "eslint-plugin-react-refresh": "^0.4.16",
     "postcss": "^8.5.3",
+    "prettier": "^3.4.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3",
-    "vite": "^5.4.14",
-    "prettier": "^3.4.2"
+    "vite": "^5.4.14"
   }
 }

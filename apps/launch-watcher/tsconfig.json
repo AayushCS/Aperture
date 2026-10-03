@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@aperture/orbital-core": ["../../packages/orbital-core/src/index.ts"]
     }
   },
   "include": ["src"],

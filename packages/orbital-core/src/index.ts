@@ -1,113 +1,119 @@
 /**
- * Aperture Orbital Core
- * High-performance orbital mechanics engine for launch window planning
+ * Aperture Orbital Core — launch window planning engine.
  */
+import { OrbitalEngine } from './calculations'
+import type { LaunchSite, VehicleParams } from './types'
 
-export * from './types'
-export * from './calculations'
+export { OrbitalEngine, nextWindow, corridorMargin, DEFAULT_LTAN, DEFAULT_RAAN_TOLERANCE, MAX_RANGE_DAYS } from './calculations'
 export * from './math'
+export * from './astro'
+export * from './orbit'
+export * from './trajectory'
+export * from './weather'
+export * from './constants'
+export * from './types'
 
-// Common launch sites
+/** Launch sites with approximate range-safety azimuth corridors */
 export const COMMON_LAUNCH_SITES = {
   KSC: {
+    id: 'KSC',
     name: 'Kennedy Space Center',
     latitude: 28.5729,
     longitude: -80.6489,
     altitude: 3,
+    azimuthCorridors: [[35, 120]],
+    climate: 'subtropical-coastal',
   },
   VANDENBERG: {
+    id: 'VANDENBERG',
     name: 'Vandenberg Space Force Base',
-    latitude: 34.7420,
+    latitude: 34.742,
     longitude: -120.5724,
     altitude: 112,
+    azimuthCorridors: [[145, 210]],
+    climate: 'mediterranean-coastal',
   },
   BAIKONUR: {
+    id: 'BAIKONUR',
     name: 'Baikonur Cosmodrome',
     latitude: 45.965,
     longitude: 63.305,
     altitude: 90,
+    azimuthCorridors: [[30, 100]],
+    climate: 'continental',
   },
   GUIANA: {
+    id: 'GUIANA',
     name: 'Guiana Space Centre',
     latitude: 5.239,
     longitude: -52.768,
     altitude: 10,
+    azimuthCorridors: [[349.5, 93.5]],
+    climate: 'equatorial',
   },
-} as const
+  MAHIA: {
+    id: 'MAHIA',
+    name: 'Rocket Lab Launch Complex 1',
+    latitude: -39.2627,
+    longitude: 177.8647,
+    altitude: 0,
+    azimuthCorridors: [[20, 200]],
+    climate: 'temperate-maritime',
+  },
+} as const satisfies Record<string, LaunchSite>
 
-// Common vehicles
+export type LaunchSiteId = keyof typeof COMMON_LAUNCH_SITES
+
+/** Representative vehicles (ascent duration ≈ liftoff to first orbit insertion) */
 export const COMMON_VEHICLES = {
   FALCON_9: {
+    id: 'FALCON_9',
     name: 'Falcon 9',
-    ascentDuration: 540, // 9 minutes
-    minInclination: 28.5,
-    maxInclination: 98.0,
+    ascentDuration: 522,
+    minInclination: 0,
+    maxInclination: 140,
+    maxAltitude: 2000,
     launchSite: COMMON_LAUNCH_SITES.KSC,
   },
   FALCON_HEAVY: {
+    id: 'FALCON_HEAVY',
     name: 'Falcon Heavy',
-    ascentDuration: 600, // 10 minutes
-    minInclination: 28.5,
-    maxInclination: 98.0,
+    ascentDuration: 600,
+    minInclination: 0,
+    maxInclination: 140,
+    maxAltitude: 2000,
     launchSite: COMMON_LAUNCH_SITES.KSC,
   },
   ATLAS_V: {
+    id: 'ATLAS_V',
     name: 'Atlas V',
-    ascentDuration: 660, // 11 minutes
-    minInclination: 28.5,
-    maxInclination: 98.0,
+    ascentDuration: 660,
+    minInclination: 0,
+    maxInclination: 120,
+    maxAltitude: 2000,
     launchSite: COMMON_LAUNCH_SITES.KSC,
+  },
+  SOYUZ_2: {
+    id: 'SOYUZ_2',
+    name: 'Soyuz-2',
+    ascentDuration: 528,
+    minInclination: 45,
+    maxInclination: 100,
+    maxAltitude: 1500,
+    launchSite: COMMON_LAUNCH_SITES.BAIKONUR,
   },
   ELECTRON: {
+    id: 'ELECTRON',
     name: 'Electron',
-    ascentDuration: 480, // 8 minutes
-    minInclination: 39.0,
-    maxInclination: 98.0,
-    launchSite: {
-      name: 'Rocket Lab Launch Complex 1',
-      latitude: -39.2627,
-      longitude: 177.8647,
-      altitude: 0,
-    },
+    ascentDuration: 540,
+    minInclination: 37,
+    maxInclination: 120,
+    maxAltitude: 1200,
+    launchSite: COMMON_LAUNCH_SITES.MAHIA,
   },
-} as const
+} as const satisfies Record<string, VehicleParams>
 
-/**
- * Example usage
- */
-export async function calculateExample(): Promise<void> {
-  const engine = new OrbitalEngine()
-  
-  const input = {
-    orbit: {
-      type: 'LEO' as const,
-      altitude: 400,
-      inclination: 45.1,
-    },
-    vehicle: COMMON_VEHICLES.FALCON_9,
-    dateRange: {
-      start: new Date('2024-01-01'),
-      end: new Date('2024-01-07'),
-    },
-    launchSite: COMMON_LAUNCH_SITES.KSC,
-    constraints: {
-      daylightOnly: true,
-      maxWeatherRisk: 'medium' as const,
-    },
-  }
-  
-  const windows = engine.calculateLaunchWindows(input)
-  
-  console.log(`Found ${windows.length} launch windows`)
-  windows.slice(0, 3).forEach((window: any, i: number) => {
-    console.log(`Window ${i + 1}:`)
-    console.log(`  Start: ${window.start.toISOString()}`)
-    console.log(`  Duration: ${(window.duration / 60).toFixed(1)} minutes`)
-    console.log(`  Quality: ${(window.quality * 100).toFixed(1)}%`)
-    console.log(`  Weather Risk: ${window.weatherRisk}`)
-    console.log(`  Visibility Regions: ${window.visibilityRegions.length}`)
-  })
-}
+export type VehicleId = keyof typeof COMMON_VEHICLES
 
-// Export default engine instance
+/** Shared engine instance */
 export const orbitalEngine = new OrbitalEngine()

@@ -1,111 +1,79 @@
-import { useState, useEffect } from 'react'
-import { Clock } from 'lucide-react'
+import type { LaunchWindow } from '@aperture/orbital-core'
+import { useNow } from '@/hooks/useNow'
+import { fmt } from '@/lib/format'
+import { cn } from '@/utils/cn'
 
-interface CountdownTimerProps {
-  targetDate: Date
+type Phase = 'pending' | 'open' | 'closed'
+
+function phaseOf(window: LaunchWindow, now: Date): Phase {
+  if (now < window.start) return 'pending'
+  if (now <= window.end) return 'open'
+  return 'closed'
 }
 
-const CountdownTimer = ({ targetDate }: CountdownTimerProps) => {
-  const [timeLeft, setTimeLeft] = useState({
-    days: 0,
-    hours: 0,
-    minutes: 0,
-    seconds: 0,
-  })
+function split(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return {
+    days: Math.floor(total / 86400),
+    hours: Math.floor((total % 86400) / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60,
+  }
+}
 
-  useEffect(() => {
-    const calculateTimeLeft = () => {
-      const difference = targetDate.getTime() - Date.now()
-      
-      if (difference > 0) {
-        setTimeLeft({
-          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
-          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
-          minutes: Math.floor((difference / 1000 / 60) % 60),
-          seconds: Math.floor((difference / 1000) % 60),
-        })
-      } else {
-        // Launch time has passed
-        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 })
-      }
-    }
-
-    calculateTimeLeft()
-    const timer = setInterval(calculateTimeLeft, 1000)
-
-    return () => clearInterval(timer)
-  }, [targetDate])
-
-  const timeUnits = [
-    { label: 'Days', value: timeLeft.days },
-    { label: 'Hours', value: timeLeft.hours },
-    { label: 'Minutes', value: timeLeft.minutes },
-    { label: 'Seconds', value: timeLeft.seconds },
+/** Live countdown to window open, then to window close */
+export default function CountdownTimer({ window }: { window: LaunchWindow }) {
+  const now = useNow(1000)
+  const phase = phaseOf(window, now)
+  const target = phase === 'pending' ? window.start : window.end
+  const t = split(target.getTime() - now.getTime())
+  const units = [
+    { label: 'Days', value: t.days },
+    { label: 'Hours', value: t.hours },
+    { label: 'Minutes', value: t.minutes },
+    { label: 'Seconds', value: t.seconds },
   ]
+  const openProgress =
+    phase === 'open' ? (now.getTime() - window.start.getTime()) / (window.end.getTime() - window.start.getTime()) : 0
+
+  const heading =
+    phase === 'pending' ? 'Window opens in' : phase === 'open' ? 'Window open · closes in' : 'Window closed'
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-center space-x-1 text-sm text-gray-400">
-        <Clock className="h-4 w-4" />
-        <span>Launch window opens in:</span>
+    <div>
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        {phase === 'open' && <span aria-hidden className="size-2 animate-pulse rounded-full bg-go" />}
+        {heading}
       </div>
-      
-      <div className="flex justify-center space-x-4">
-        {timeUnits.map((unit, index) => (
-          <div key={index} className="flex flex-col items-center">
-            <div className="relative">
-              {/* Outer glow */}
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl blur-lg opacity-30"></div>
-              
-              {/* Time unit box */}
-              <div className="relative bg-space-dark border border-blue-500/30 rounded-xl w-20 h-20 flex flex-col items-center justify-center">
-                <div className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                  {unit.value.toString().padStart(2, '0')}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">{unit.label}</div>
-              </div>
+
+      {/* Visual countdown is hidden from screen readers; a polite summary is announced each minute instead */}
+      <div aria-hidden className="mt-3 grid grid-cols-4 gap-2 sm:gap-3">
+        {units.map((u) => (
+          <div key={u.label} className="rounded-lg border bg-background/50 px-2 py-3 text-center">
+            <div className={cn('tabular font-mono text-3xl font-semibold sm:text-5xl', phase === 'open' && 'text-go')}>
+              {String(u.value).padStart(2, '0')}
             </div>
+            <div className="mt-1 text-[10px] uppercase tracking-widest text-muted-foreground sm:text-[11px]">{u.label}</div>
           </div>
         ))}
       </div>
+      <p className="sr-only" aria-live="polite">
+        {heading} {t.days} days {t.hours} hours {t.minutes} minutes
+      </p>
 
-      {/* Progress bar */}
-      <div className="pt-4">
-        <div className="flex justify-between text-sm text-gray-400 mb-2">
-          <span>Window Preparation</span>
-          <span>
-            {timeLeft.days === 0 && timeLeft.hours < 1 ? 'CRITICAL' : 
-             timeLeft.days === 0 && timeLeft.hours < 4 ? 'URGENT' : 
-             timeLeft.days === 0 ? 'IMMINENT' : 'NOMINAL'}
-          </span>
-        </div>
-        <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-full transition-all duration-1000"
-            style={{ 
-              width: `${Math.min(100, 100 - ((timeLeft.hours * 60 + timeLeft.minutes) / (24 * 60)) * 100)}%` 
-            }}
+      <div className="mt-4 space-y-1.5">
+        <div className="relative h-1.5 overflow-hidden rounded-full bg-secondary">
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-go transition-[width] duration-1000"
+            style={{ width: `${Math.min(100, openProgress * 100)}%` }}
           />
         </div>
-      </div>
-
-      {/* Status indicators */}
-      <div className="grid grid-cols-3 gap-4 pt-4">
-        <div className="text-center">
-          <div className={`h-2 w-2 rounded-full mx-auto mb-1 ${timeLeft.days > 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
-          <div className="text-xs text-gray-400">Vehicle</div>
-        </div>
-        <div className="text-center">
-          <div className={`h-2 w-2 rounded-full mx-auto mb-1 ${timeLeft.hours > 2 ? 'bg-green-500' : timeLeft.hours > 1 ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
-          <div className="text-xs text-gray-400">Payload</div>
-        </div>
-        <div className="text-center">
-          <div className={`h-2 w-2 rounded-full mx-auto mb-1 ${timeLeft.minutes > 30 ? 'bg-green-500' : timeLeft.minutes > 15 ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
-          <div className="text-xs text-gray-400">Weather</div>
+        <div className="tabular flex justify-between text-[11px] text-muted-foreground">
+          <span>Open {fmt.utcTime(window.start)}</span>
+          <span className="text-foreground">T-0 {fmt.utcTime(window.optimal)}</span>
+          <span>Close {fmt.utcTime(window.end)}</span>
         </div>
       </div>
     </div>
   )
 }
-
-export default CountdownTimer

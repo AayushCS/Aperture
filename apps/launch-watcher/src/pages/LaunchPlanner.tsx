@@ -1,453 +1,343 @@
-import { useState } from 'react'
-import { Calendar, Calculator, Target, Rocket, MapPin, Settings } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { orbitalEngine, COMMON_LAUNCH_SITES, COMMON_VEHICLES } from '@aperture/orbital-core'
-import type { CalculationInput, LaunchWindow } from '@aperture/orbital-core'
+import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
+import { ArrowRight, Download, RotateCcw, Settings2, Sigma, Target } from 'lucide-react'
+import {
+  COMMON_LAUNCH_SITES,
+  COMMON_VEHICLES,
+  sunSynchronousInclination,
+  type LaunchSiteId,
+  type LaunchWindow,
+  type OrbitType,
+  type VehicleId,
+  type WeatherRisk,
+} from '@aperture/orbital-core'
+import { useMissionPlan } from '@/hooks/useMissionPlan'
+import { useMissionStore } from '@/store/mission'
+import MissionHeading from '@/components/MissionHeading'
+import IssueList from '@/components/IssueList'
+import WeatherPanel from '@/components/WeatherPanel'
+import WindowTable, { LightingLabel, ScoreBar } from '@/components/WindowTable'
+import { Card, CardBody, CardHeader } from '@/components/ui/Card'
+import { RiskBadge, Stat } from '@/components/ui/Badge'
+import { Button, buttonVariants } from '@/components/ui/Button'
+import { Field, Segmented, SliderField, inputClass } from '@/components/ui/Form'
+import { fmt, isoDay } from '@/lib/format'
 
-const LaunchPlanner = () => {
-  const [orbitType, setOrbitType] = useState<'LEO' | 'POLAR' | 'SSO'>('LEO')
-  const [altitude, setAltitude] = useState(400)
-  const [inclination, setInclination] = useState(45.1)
-  const [launchSite, setLaunchSite] = useState(COMMON_LAUNCH_SITES.KSC)
-  const [vehicle, setVehicle] = useState(COMMON_VEHICLES.FALCON_9)
-  const [dateRange, setDateRange] = useState({
-    start: new Date(),
-    end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-  })
-  const [launchWindows, setLaunchWindows] = useState<LaunchWindow[]>([])
-  const [isCalculating, setIsCalculating] = useState(false)
+const ORBIT_OPTIONS: ReadonlyArray<{ value: OrbitType; label: string }> = [
+  { value: 'LEO', label: 'LEO' },
+  { value: 'POLAR', label: 'Polar' },
+  { value: 'SSO', label: 'Sun-sync' },
+]
 
-  const handleCalculate = () => {
-    setIsCalculating(true)
-    
-    // Simulate calculation with mock data
-    setTimeout(() => {
-      const mockWindows: LaunchWindow[] = []
-      const baseDate = new Date(dateRange.start)
-      
-      for (let i = 0; i < 5; i++) {
-        const start = new Date(baseDate.getTime() + i * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000) // 8 AM each day
-        mockWindows.push({
-          start,
-          end: new Date(start.getTime() + 30 * 60 * 1000),
-          duration: 30 * 60,
-          quality: 0.6 + Math.random() * 0.3,
-          weatherRisk: Math.random() > 0.7 ? 'high' : Math.random() > 0.4 ? 'medium' : 'low',
-          visibilityRegions: [],
-        })
-      }
-      
-      setLaunchWindows(mockWindows)
-      setIsCalculating(false)
-    }, 1500)
-  }
+const ORBIT_HELP: Record<OrbitType, string> = {
+  LEO: 'Low Earth orbit. Windows open when the pad rotates under the target plane (e.g. ISS rendezvous).',
+  POLAR: 'Near-90° inclination for global coverage. One northbound and one southbound opportunity per day.',
+  SSO: 'Plane locked to the Sun so the satellite crosses the equator at the same local time every day.',
+}
 
-  const orbitTypes = [
-    { value: 'LEO', label: 'Low Earth Orbit', desc: '~45.1° inclination, 160-2000 km' },
-    { value: 'POLAR', label: 'Polar Orbit', desc: '87.9°-90° inclination, global coverage' },
-    { value: 'SSO', label: 'Sun-Synchronous Orbit', desc: '~98.1° inclination, constant illumination' },
-  ]
+const RISK_OPTIONS: ReadonlyArray<{ value: WeatherRisk; label: string }> = [
+  { value: 'low', label: 'Go only' },
+  { value: 'medium', label: '≤ Watch' },
+  { value: 'high', label: 'Any' },
+]
 
-  const launchSites = Object.values(COMMON_LAUNCH_SITES)
-  const vehicles = Object.values(COMMON_VEHICLES)
+const SPAN_OPTIONS = [3, 7, 14, 30, 60]
+
+function exportCsv(windows: readonly LaunchWindow[], name: string) {
+  const header = ['window_open_utc', 't0_utc', 'window_close_utc', 'duration_s', 'azimuth_deg', 'branch', 'lighting', 'weather_risk', 'weather_violation_prob', 'weather_source', 'score']
+  const rows = windows.map((w) => [
+    w.start.toISOString(),
+    w.optimal.toISOString(),
+    w.end.toISOString(),
+    w.duration,
+    w.azimuth,
+    w.branch,
+    w.lighting.plumeSunlit ? 'sunlit-plume' : w.lighting.condition,
+    w.weatherRisk,
+    w.weather.violationProbability,
+    w.weather.source,
+    w.quality,
+  ])
+  const csv = [header, ...rows].map((r) => r.join(',')).join('\n')
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${(name || 'mission').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-windows.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+  toast.success(`Exported ${windows.length} windows`)
+}
+
+export default function LaunchPlanner() {
+  const plan = useMissionPlan()
+  const { mission, analysis, windows, focus, site, vehicle } = plan
+  const { update, applyOrbitPreset, selectWindow, reset, selectedWindowId } = useMissionStore()
+  const ssoInc = sunSynchronousInclination(mission.altitude)
+  const goCount = windows.filter((w) => w.weatherRisk === 'low').length
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Launch Window Planner</h1>
-          <p className="text-gray-400">Calculate optimal launch times based on orbital requirements</p>
-        </div>
-        <Button variant="space" className="flex items-center space-x-2">
-          <Calculator className="h-4 w-4" />
-          <span>Calculate Windows</span>
-        </Button>
-      </div>
+      <MissionHeading
+        plan={plan}
+        eyebrow="Window planner"
+        title={mission.name || 'Untitled mission'}
+        action={
+          <Button variant="ghost" size="sm" onClick={() => { reset(); toast('Mission reset to defaults') }}>
+            <RotateCcw aria-hidden /> Reset
+          </Button>
+        }
+      />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Configuration Panel */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Orbit Configuration */}
-          <div className="bg-space-dark/50 rounded-2xl p-6 border border-space-blue/30">
-            <div className="flex items-center space-x-2 mb-6">
-              <Target className="h-5 w-5 text-blue-400" />
-              <h2 className="text-xl font-semibold">Orbit Configuration</h2>
+      <div className="grid gap-6 lg:grid-cols-5">
+        {/* ---------------- Configuration ---------------- */}
+        <Card className="lg:col-span-3">
+          <CardHeader icon={<Settings2 />} title="Mission profile" description="Changes recalculate instantly and are saved in this browser" />
+          <CardBody className="space-y-6">
+            <Field label="Mission name" htmlFor="mission-name">
+              <input
+                id="mission-name"
+                className={inputClass}
+                value={mission.name}
+                maxLength={60}
+                onChange={(e) => update({ name: e.target.value })}
+              />
+            </Field>
+
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground">Orbit family</span>
+              <Segmented label="Orbit family" value={mission.orbitType} options={ORBIT_OPTIONS} onChange={applyOrbitPreset} />
+              <p className="text-xs text-muted-foreground">{ORBIT_HELP[mission.orbitType]}</p>
             </div>
 
-            {/* Orbit Type Selection */}
-            <div className="mb-6">
-              <h3 className="font-medium mb-3">Orbit Type</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {orbitTypes.map((type) => (
-                  <button
-                    key={type.value}
-                    className={`p-4 rounded-xl border text-left transition ${
-                      orbitType === type.value
-                        ? 'border-blue-500 bg-blue-500/10'
-                        : 'border-gray-700 hover:border-gray-600'
-                    }`}
-                    onClick={() => {
-                      setOrbitType(type.value as 'LEO' | 'POLAR' | 'SSO')
-                      // Set default inclination for orbit type
-                      if (type.value === 'LEO') setInclination(45.1)
-                      if (type.value === 'POLAR') setInclination(90.0)
-                      if (type.value === 'SSO') setInclination(98.1)
-                    }}
-                  >
-                    <div className="font-medium">{type.label}</div>
-                    <div className="text-sm text-gray-400 mt-1">{type.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Altitude and Inclination */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Altitude (km)
-                </label>
-                <div className="relative">
-                  <input
-                    type="range"
-                    min="160"
-                    max="2000"
-                    step="10"
-                    value={altitude}
-                    onChange={(e) => setAltitude(parseInt(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                  />
-                  <div className="flex justify-between text-xs text-gray-400 mt-1">
-                    <span>160</span>
-                    <span>2000</span>
-                  </div>
-                  <div className="text-center mt-2">
-                    <span className="text-2xl font-bold">{altitude}</span>
-                    <span className="text-gray-400 ml-1">km</span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Inclination (°)
-                </label>
-                <div className="relative">
-                  <input
-                    type="range"
-                    min="0"
-                    max="180"
-                    step="0.1"
-                    value={inclination}
-                    onChange={(e) => setInclination(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                  />
-                  <div className="flex justify-between text-xs text-gray-400 mt-1">
-                    <span>0°</span>
-                    <span>180°</span>
-                  </div>
-                  <div className="text-center mt-2">
-                    <span className="text-2xl font-bold">{inclination.toFixed(1)}</span>
-                    <span className="text-gray-400 ml-1">°</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Launch Configuration */}
-          <div className="bg-space-dark/50 rounded-2xl p-6 border border-space-blue/30">
-            <div className="flex items-center space-x-2 mb-6">
-              <Rocket className="h-5 w-5 text-blue-400" />
-              <h2 className="text-xl font-semibold">Launch Configuration</h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Launch Site Selection */}
-              <div>
-                <h3 className="font-medium mb-3 flex items-center space-x-2">
-                  <MapPin className="h-4 w-4" />
-                  <span>Launch Site</span>
-                </h3>
-                <div className="space-y-2">
-                  {launchSites.map((site) => (
-                    <button
-                      key={site.name}
-                      className={`w-full p-3 rounded-lg border text-left ${
-                        launchSite.name === site.name
-                          ? 'border-blue-500 bg-blue-500/10'
-                          : 'border-gray-700 hover:border-gray-600'
-                      }`}
-                      onClick={() => setLaunchSite(site)}
-                    >
-                      <div className="font-medium">{site.name}</div>
-                      <div className="text-sm text-gray-400">
-                        {site.latitude.toFixed(2)}°N, {site.longitude.toFixed(2)}°E
-                      </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <SliderField id="altitude" label="Altitude" unit="km" min={160} max={2000} step={10} value={mission.altitude} onChange={(altitude) => update({ altitude })} />
+              <SliderField
+                id="inclination"
+                label="Inclination"
+                unit="°"
+                min={0}
+                max={140}
+                step={0.01}
+                value={mission.inclination}
+                onChange={(inclination) => update({ inclination })}
+                hint={
+                  mission.orbitType === 'SSO' ? (
+                    <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => update({ inclination: Number(ssoInc.toFixed(2)) })}>
+                      Use sun-synchronous value {fmt.deg(ssoInc, 2)}
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Vehicle Selection */}
-              <div>
-                <h3 className="font-medium mb-3 flex items-center space-x-2">
-                  <Rocket className="h-4 w-4" />
-                  <span>Launch Vehicle</span>
-                </h3>
-                <div className="space-y-2">
-                  {vehicles.map((vehicleItem) => (
-                    <button
-                      key={vehicleItem.name}
-                      className={`w-full p-3 rounded-lg border text-left ${
-                        vehicle.name === vehicleItem.name
-                          ? 'border-blue-500 bg-blue-500/10'
-                          : 'border-gray-700 hover:border-gray-600'
-                      }`}
-                      onClick={() => setVehicle(vehicleItem)}
-                    >
-                      <div className="font-medium">{vehicleItem.name}</div>
-                      <div className="text-sm text-gray-400">
-                        Inclination: {vehicleItem.minInclination}°-{vehicleItem.maxInclination}°
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Date Range */}
-            <div className="mt-6">
-              <h3 className="font-medium mb-3 flex items-center space-x-2">
-                <Calendar className="h-4 w-4" />
-                <span>Date Range</span>
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2"
-                    value={dateRange.start.toISOString().split('T')[0]}
-                    onChange={(e) => setDateRange({ ...dateRange, start: new Date(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">End Date</label>
-                  <input
-                    type="date"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2"
-                    value={dateRange.end.toISOString().split('T')[0]}
-                    onChange={(e) => setDateRange({ ...dateRange, end: new Date(e.target.value) })}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Calculate Button */}
-          <div className="flex justify-center">
-            <Button
-              variant="space"
-              size="lg"
-              className="px-8 py-6 text-lg"
-              onClick={handleCalculate}
-              disabled={isCalculating}
-            >
-              {isCalculating ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                  Calculating Windows...
-                </>
+                  ) : (
+                    `Reachable from ${site.name}: ${fmt.deg(Math.abs(site.latitude))}–${fmt.deg(180 - Math.abs(site.latitude))}`
+                  )
+                }
+              />
+              {mission.orbitType === 'SSO' ? (
+                <SliderField
+                  id="ltan"
+                  label="Local time of ascending node"
+                  unit="h"
+                  min={0}
+                  max={24}
+                  step={0.25}
+                  value={mission.ltan}
+                  onChange={(ltan) => update({ ltan })}
+                  hint={`Descending node at ${((mission.ltan + 12) % 24).toFixed(2)} h local solar time`}
+                />
               ) : (
-                <>
-                  <Calculator className="h-5 w-5 mr-2" />
-                  Calculate Launch Windows
-                </>
+                <SliderField
+                  id="raan"
+                  label="Target RAAN (1 Jan 2026 epoch)"
+                  unit="°"
+                  min={0}
+                  max={360}
+                  step={0.5}
+                  value={mission.raan}
+                  onChange={(raan) => update({ raan })}
+                  hint="Right ascension of the ascending node; precesses with J2"
+                />
               )}
-            </Button>
-          </div>
-        </div>
-
-        {/* Results Panel */}
-        <div className="space-y-6">
-          {/* Summary Card */}
-          <div className="bg-space-dark/50 rounded-2xl p-6 border border-space-blue/30">
-            <h3 className="font-semibold mb-4">Mission Summary</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Orbit Type:</span>
-                <span className="font-medium">{orbitType}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Altitude:</span>
-                <span className="font-medium">{altitude} km</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Inclination:</span>
-                <span className="font-medium">{inclination.toFixed(1)}°</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Launch Site:</span>
-                <span className="font-medium">{launchSite.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Vehicle:</span>
-                <span className="font-medium">{vehicle.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Date Range:</span>
-                <span className="font-medium">
-                  {dateRange.start.toLocaleDateString()} - {dateRange.end.toLocaleDateString()}
-                </span>
-              </div>
             </div>
 
-            {/* Compatibility Check */}
-            <div className="mt-6 pt-6 border-t border-gray-700">
-              <h4 className="font-medium mb-3">Compatibility Check</h4>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field label="Launch site" htmlFor="site">
+                <select id="site" className={inputClass} value={mission.siteId} onChange={(e) => update({ siteId: e.target.value as LaunchSiteId })}>
+                  {Object.entries(COMMON_LAUNCH_SITES).map(([id, s]) => (
+                    <option key={id} value={id}>
+                      {s.name} ({fmt.lat(s.latitude)})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Launch vehicle" htmlFor="vehicle" hint={`Ascent to insertion ${fmt.duration(vehicle.ascentDuration)} · max ${vehicle.maxAltitude} km`}>
+                <select id="vehicle" className={inputClass} value={mission.vehicleId} onChange={(e) => update({ vehicleId: e.target.value as VehicleId })}>
+                  {Object.entries(COMMON_VEHICLES).map(([id, v]) => (
+                    <option key={id} value={id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Search from (UTC)" htmlFor="start" hint={mission.startDate ? undefined : 'Defaults to now'}>
+                <input
+                  id="start"
+                  type="date"
+                  className={inputClass}
+                  value={mission.startDate || isoDay(new Date())}
+                  onChange={(e) => update({ startDate: e.target.value })}
+                />
+              </Field>
+              <Field label="Search span" htmlFor="span">
+                <select id="span" className={inputClass} value={mission.spanDays} onChange={(e) => update({ spanDays: Number(e.target.value) })}>
+                  {SPAN_OPTIONS.map((d) => (
+                    <option key={d} value={d}>
+                      {d} days
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Inclination Range:</span>
-                  <span className={`text-sm ${inclination >= vehicle.minInclination && inclination <= vehicle.maxInclination ? 'text-green-400' : 'text-red-400'}`}>
-                    {inclination >= vehicle.minInclination && inclination <= vehicle.maxInclination ? '✓ Compatible' : '✗ Out of Range'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Launch Site Latitude:</span>
-                  <span className="text-sm text-green-400">✓ Valid</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Orbit Type Match:</span>
-                  <span className="text-sm text-green-400">✓ Supported</span>
-                </div>
+                <span className="text-xs font-medium text-muted-foreground">Maximum weather risk</span>
+                <Segmented label="Maximum weather risk" value={mission.maxWeatherRisk} options={RISK_OPTIONS} onChange={(maxWeatherRisk) => update({ maxWeatherRisk })} />
               </div>
+              <label className="flex cursor-pointer items-center gap-3 self-end rounded-lg border bg-background/40 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[hsl(var(--primary))]"
+                  checked={mission.daylightOnly}
+                  onChange={(e) => update({ daylightOnly: e.target.checked })}
+                />
+                Daylight launches only
+              </label>
             </div>
-          </div>
+          </CardBody>
+        </Card>
 
-          {/* Quick Actions */}
-          <div className="bg-space-dark/50 rounded-2xl p-6 border border-space-blue/30">
-            <h3 className="font-semibold mb-4">Quick Actions</h3>
-            <div className="space-y-3">
-              <Button variant="outline" className="w-full justify-start">
-                <Settings className="h-4 w-4 mr-2" />
-                Advanced Settings
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                <Calendar className="h-4 w-4 mr-2" />
-                Save Mission Profile
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                <Target className="h-4 w-4 mr-2" />
-                Compare Scenarios
-              </Button>
-            </div>
-          </div>
+        {/* ---------------- Analysis ---------------- */}
+        <div className="space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader
+              icon={<Sigma />}
+              title="Mission analysis"
+              action={
+                <span className={analysis.feasible ? 'text-xs font-semibold text-go' : 'text-xs font-semibold text-nogo'}>
+                  {analysis.feasible ? 'Feasible' : 'Not feasible'}
+                </span>
+              }
+            />
+            <CardBody className="space-y-4">
+              <dl className="grid grid-cols-2 gap-2">
+                <Stat label="Period" value={`${analysis.periodMinutes.toFixed(1)} min`} hint={`${(1440 / analysis.periodMinutes).toFixed(2)} rev/day`} />
+                <Stat label="Velocity" value={`${analysis.velocityKmS.toFixed(2)} km/s`} hint="Circular orbit" />
+                <Stat label="Node drift (J2)" value={`${analysis.nodalPrecessionDegDay.toFixed(3)}°/d`} hint={analysis.nodalPrecessionDegDay < 0 ? 'Westward' : 'Eastward'} />
+                <Stat label="Track shift" value={fmt.deg(analysis.groundTrackShiftDeg, 2)} hint="West per revolution" />
+              </dl>
+              {analysis.opportunities.length > 0 && (
+                <div className="space-y-1.5">
+                  <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Launch opportunities per day</h3>
+                  <ul className="divide-y rounded-lg border text-sm">
+                    {analysis.opportunities.map((o) => (
+                      <li key={o.branch} className="tabular flex items-center justify-between px-3 py-2">
+                        <span className="capitalize">{o.branch} pass</span>
+                        <span className="flex items-center gap-3">
+                          <span>{fmt.deg(o.azimuth)}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {o.rotationalGain >= 0 ? '+' : ''}
+                            {(o.rotationalGain * 1000).toFixed(0)} m/s
+                          </span>
+                          <span className={o.withinCorridor ? 'w-16 text-right text-xs text-go' : 'w-16 text-right text-xs text-nogo'}>
+                            {o.withinCorridor ? 'Allowed' : 'Restricted'}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-[11px] text-muted-foreground">m/s = velocity gained (or lost) from Earth's rotation; “Restricted” = outside range-safety corridor.</p>
+                </div>
+              )}
+              <IssueList issues={analysis.issues} />
+            </CardBody>
+          </Card>
 
-          {/* Tips */}
-          <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl p-4 border border-blue-500/20">
-            <h4 className="font-semibold text-sm mb-2">Planning Tips</h4>
-            <ul className="text-xs text-gray-400 space-y-1">
-              <li>• LEO: Optimal for ISS resupply and Earth observation</li>
-              <li>• Polar: Best for global coverage and reconnaissance</li>
-              <li>• SSO: Ideal for consistent lighting conditions</li>
-              <li>• Consider weather patterns for launch site selection</li>
-            </ul>
-          </div>
+          {focus && <WindowDetail window={focus} selected={focus.id === selectedWindowId} />}
         </div>
       </div>
 
-      {/* Results Section */}
-      {launchWindows.length > 0 && (
-        <div className="bg-space-dark/50 rounded-2xl p-6 border border-space-blue/30">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold">Calculated Launch Windows</h2>
-            <div className="text-sm text-gray-400">
-              Found {launchWindows.length} windows
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-gray-400 border-b border-space-blue/30">
-                  <th className="pb-3">Date & Time</th>
-                  <th className="pb-3">Duration</th>
-                  <th className="pb-3">Weather Risk</th>
-                  <th className="pb-3">Quality</th>
-                  <th className="pb-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {launchWindows.map((window, index) => (
-                  <tr key={index} className="border-b border-space-blue/10 hover:bg-space-blue/5">
-                    <td className="py-4">
-                      <div className="font-medium">{window.start.toLocaleDateString()}</div>
-                      <div className="text-sm text-gray-400">
-                        {window.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} UTC
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      {(window.duration / 60).toFixed(0)} minutes
-                    </td>
-                    <td className="py-4">
-                      <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                        window.weatherRisk === 'low' ? 'bg-green-500/20 text-green-400' :
-                        window.weatherRisk === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                        'bg-red-500/20 text-red-400'
-                      }`}>
-                        {window.weatherRisk.charAt(0).toUpperCase() + window.weatherRisk.slice(1)}
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-24 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
-                            style={{ width: `${window.quality * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-sm">{(window.quality * 100).toFixed(0)}%</span>
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex space-x-2">
-                        <Button variant="ghost" size="sm" className="text-blue-400">
-                          Select
-                        </Button>
-                        <Button variant="ghost" size="sm" className="text-gray-400">
-                          Details
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Best Window Recommendation */}
-          {launchWindows.length > 0 && (
-            <div className="mt-6 pt-6 border-t border-space-blue/30">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-semibold">Recommended Window</h4>
-                  <p className="text-sm text-gray-400">
-                    {launchWindows[0].start.toLocaleDateString()} at{' '}
-                    {launchWindows[0].start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                </div>
-                <Button variant="space">
-                  Plan This Mission
-                </Button>
-              </div>
-            </div>
+      {/* ---------------- Results ---------------- */}
+      <Card>
+        <CardHeader
+          icon={<Target />}
+          title={`${windows.length} launch windows`}
+          description={
+            windows.length
+              ? `${goCount} with GO weather · ${fmt.utcDate(plan.input.dateRange.start)} – ${fmt.utcDate(plan.input.dateRange.end)}`
+              : 'No windows match the current profile and constraints'
+          }
+          action={
+            <Button variant="outline" size="sm" disabled={!windows.length} onClick={() => exportCsv(windows, mission.name)}>
+              <Download aria-hidden /> Export CSV
+            </Button>
+          }
+        />
+        <div className="mt-3 max-h-[560px] overflow-y-auto">
+          {windows.length > 0 ? (
+            <WindowTable windows={windows} selectedId={focus?.id} onSelect={selectWindow} caption="Calculated launch windows" />
+          ) : (
+            <p className="px-5 pb-5 text-sm text-muted-foreground">Try relaxing the weather or daylight constraints, widening the span, or resolving the issues above.</p>
           )}
         </div>
-      )}
+      </Card>
     </div>
   )
 }
 
-export default LaunchPlanner
+function WindowDetail({ window: w, selected }: { window: LaunchWindow; selected: boolean }) {
+  const b = w.scoreBreakdown
+  return (
+    <Card>
+      <CardHeader
+        title={selected ? 'Selected window' : 'Next window'}
+        description={`${fmt.utcDateTime(w.optimal)} · ${fmt.local(w.optimal)}`}
+        action={<RiskBadge risk={w.weatherRisk} />}
+      />
+      <CardBody className="space-y-5">
+        <dl className="grid grid-cols-2 gap-2">
+          <Stat label="Opens" value={fmt.utcTime(w.start)} />
+          <Stat label="Closes" value={fmt.utcTime(w.end)} />
+          <Stat label="Azimuth" value={fmt.deg(w.azimuth)} hint={`${w.branch} pass`} />
+          <Stat label="Lighting" value={<LightingLabel window={w} />} hint={`Sun ${fmt.deg(w.lighting.sunElevation)} at pad`} />
+          <Stat label="Insertion" value={fmt.utcTime(w.insertion.time)} hint={`${fmt.lat(w.insertion.latitude)} ${fmt.lon(w.insertion.longitude)}`} />
+          <Stat label="RAAN" value={fmt.deg(w.raan, 2)} hint="At insertion" />
+        </dl>
+
+        <div className="space-y-2">
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Score breakdown</h3>
+          <dl className="space-y-1.5 text-sm">
+            {(
+              [
+                ['Weather (50%)', b.weather],
+                ['Performance (20%)', b.performance],
+                ['Corridor margin (15%)', b.corridor],
+                ['Public viewing (15%)', b.viewing],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd>
+                  <ScoreBar value={value} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <WeatherPanel weather={w.weather} compact />
+
+        <Link to="/orbit" className={buttonVariants({ variant: 'secondary', className: 'w-full' })}>
+          Visualise this window <ArrowRight aria-hidden />
+        </Link>
+      </CardBody>
+    </Card>
+  )
+}

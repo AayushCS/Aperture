@@ -1,24 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
 
-echo "🚀 Installing Aperture dependencies..."
+command -v bun >/dev/null || { echo "Bun is required: https://bun.sh" >&2; exit 1; }
 
-echo "📦 Installing orbital-core dependencies..."
-cd packages/orbital-core
-bun install
-cd ../..
+echo "Installing orbital-core…"
+(cd packages/orbital-core && bun install)
 
-echo "🌐 Installing launch-watcher dependencies..."
-cd apps/launch-watcher
-bun install
-cd ../..
+echo "Installing launch-watcher…"
+(cd apps/launch-watcher && bun install)
 
-echo "✅ Installation complete!"
-echo ""
-echo "To start development:"
-echo "  bun run dev"
-echo ""
-echo "To run tests:"
-echo "  bun run test"
-echo ""
-echo "To build for production:"
-echo "  bun run build"
+echo
+echo "Done. Start the app with:  bun run dev   (http://localhost:3000)"

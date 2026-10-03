@@ -1,223 +1,63 @@
-# 🚀 Aperture - Orbital Launch Window Planning Tool
+# Aperture
 
-<div align="center">
+Launch window planning for LEO, polar and sun-synchronous missions — an orbital mechanics engine plus a public "Launch Watch" dashboard.
 
-![Aperture Banner](https://img.shields.io/badge/Aperture-Orbital%20Launch%20Planner-blueviolet)
-![Bun](https://img.shields.io/badge/Bun-1.0-FFC131)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6)
-![React](https://img.shields.io/badge/React-18-61DAFB)
-![Vite](https://img.shields.io/badge/Vite-5.0-646CFF)
-![License](https://img.shields.io/badge/License-MIT-green)
+- **Orbital Architect** (`packages/orbital-core`): solves for the instants when Earth's rotation carries a launch site through the target orbital plane, then applies vehicle limits, range-safety azimuth corridors, lighting and weather constraints, and scores each window.
+- **Launch Watcher** (`apps/launch-watcher`): live countdown, Green/Yellow/Red weather go/no-go, ascent viewing map, window planner and an animated orbit globe.
 
-**Calculate optimal launch windows based on orbital requirements with real-time visualizations**
+## Quick start
 
-[User Guide](#-user-guide) • [Features](#-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [Documentation](#-documentation)
-
-</div>
-
-## 🎯 Overview
-
-Aperture solves the complex puzzle of matching satellite orbital parameters with Earth's rotation, weather patterns, and launch vehicle capabilities. It provides both mission planning tools for agencies and an engaging public dashboard for space enthusiasts.
-
-### Mission Statement
-> "Space agencies and private launch providers face a complex puzzle: matching a satellite's required orbital parameters with the Earth's rotation, weather patterns, and launch vehicle capabilities. A missed window can cost millions."
-
-## ✨ Features
-
-### Track 1: The Orbital Architect (Data & Math Focused)
-- **Orbital Mechanics Engine**: Calculate launch windows for LEO, Polar, and SSO orbits
-- **Vehicle Duration Integration**: Account for rocket ascent time to orbit insertion
-- **Constraint Validation**: Validate vehicle compatibility and weather risks
-- **Visibility Calculations**: Determine geographic regions with best viewing conditions
-
-### Track 2: The Launch Watcher (UX & Visualization Focused)
-- **Countdown Timer**: Real-time countdown to next available launch window
-- **Orbit Visualization**: Interactive 2D/3D visualization of launch trajectories
-- **Weather Impact Indicators**: Green/Yellow/Red indicators based on weather conditions
-- **Viewing Maps**: Geographic maps showing best viewing regions for ascent
-
-## 🏗️ Architecture
-
-### Tech Stack
-- **Full-Stack TypeScript**: Unified language across frontend and backend
-- **Runtime**: **Bun 1.0+** - Fast JavaScript/TypeScript runtime
-- **Orbital Core**: Custom TypeScript orbital mechanics engine with `satellite.js`
-- **React Dashboard**: Modern React 18+ with Vite, TypeScript, and shadcn/ui
-- **Visualization**: Custom canvas for 2D orbital visualizations, interactive maps
-
-### Project Structure
-```
-Aperture/
-├── packages/
-│   └── orbital-core/          # TypeScript orbital mechanics engine
-├── apps/
-│   └── launch-watcher/        # React web dashboard
-├── ARCHITECTURE.md            # System design documentation
-├── USER_GUIDE.md             # Comprehensive user guide
-└── BUN_SETUP.md              # Bun installation and setup guide
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-- **Bun 1.0+** (recommended) or Node.js 20+ with pnpm
-- Modern web browser
-
-> **Tip**: Bun is 10-100x faster! See [BUN_SETUP.md](./BUN_SETUP.md) for setup.
-
-### Quick Start
-```bash
-# Clone the repository
-git clone https://github.com/your-org/aperture.git
-cd aperture
-
-# Install dependencies with the install script
-bash install.sh
-
-# Or install manually:
-# cd packages/orbital-core && bun install
-# cd ../../apps/launch-watcher && bun install
-
-# Start development server
-bun run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) to see the dashboard!
-
-## 📖 Documentation
-
-### Complete Documentation
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Detailed system architecture and design
-- **[USER_GUIDE.md](./USER_GUIDE.md)** - Comprehensive user and developer guide
-- **[BUN_SETUP.md](./BUN_SETUP.md)** - Bun installation and setup guide
-- **API Documentation** - Available in the orbital-core package
-
-### Key Components
-
-#### Orbital Core (`@aperture/orbital-core`)
-```typescript
-import { orbitalEngine } from '@aperture/orbital-core'
-
-// Calculate launch windows
-const windows = orbitalEngine.calculateLaunchWindows({
-  orbit: { type: 'LEO', altitude: 400, inclination: 45.1 },
-  dateRange: { start: new Date(), end: new Date('2024-01-07') },
-  launchSite: { name: 'KSC', latitude: 28.5729, longitude: -80.6489 },
-})
-```
-
-#### Web Dashboard (`apps/launch-watcher`)
-- **Dashboard**: Mission control overview with countdown timer
-- **Launch Planner**: Interactive launch window calculation
-- **Orbit Visualizer**: 3D orbital simulation
-
-## 🧪 Testing
+Requires [Bun](https://bun.sh) ≥ 1.1.
 
 ```bash
-# Run orbital core tests (with Bun's built-in test runner)
-cd packages/orbital-core
-bun test
-
-# Run tests with coverage
-bun test --coverage
-
-# Run tests with watch mode
-bun test --watch
+bash install.sh     # installs both packages
+bun run dev         # http://localhost:3000
 ```
 
-Comprehensive test suite includes:
-- LEO, Polar, and SSO orbit calculations
-- Constraint validation
-- Vehicle compatibility checks
-- Visibility region generation
-- Mathematical utility functions
+| Command | What it does |
+| --- | --- |
+| `bun run dev` | Vite dev server; the app consumes the engine from source with HMR |
+| `bun run test` | Engine test suite (`bun test`) |
+| `bun run type-check` | Strict TypeScript for engine and app |
+| `bun run build` | Engine library (ESM + CJS + `.d.ts`) and production app bundle |
+| `bun run check` | All of the above |
 
-## 🏃‍♂️ Development
+## Using the app
 
-### Development Commands
-```bash
-# Install dependencies
-bun install
+- **Launch Watch** (`/`) — countdown to the next window (switches to "closes in" while the window is open), weather at T-0 against launch-commit criteria, a map of the ascent ground path with viewing zones, and the upcoming windows.
+- **Window Planner** (`/planner`) — edit the mission (orbit family, altitude, inclination, RAAN or LTAN, site, vehicle, date span, constraints). Results recalculate instantly, feasibility problems are explained, and windows can be exported to CSV. The profile is saved in `localStorage`.
+- **Orbit** (`/orbit`) — orthographic globe showing ascent, insertion and the first three orbits of ground track, with day/night terminator and coverage footprint.
 
-# Start development
-bun run dev
+Weather comes from the [Open-Meteo](https://open-meteo.com/) 16-day hourly forecast (free, no key; only the public site coordinates are sent). Beyond the forecast horizon, or if the request fails, a deterministic per-site climatology model is used. The data source is always labelled in the UI.
 
-# Build for production
-bun run build
+## Engine API
 
-# Run tests
-bun run test
+```ts
+import { orbitalEngine, COMMON_LAUNCH_SITES, COMMON_VEHICLES } from '@aperture/orbital-core'
 
-# Type checking
-bun run type-check
+const input = {
+  orbit: { type: 'LEO', altitude: 420, inclination: 51.64, raan: 120, raanEpoch: new Date('2026-01-01') },
+  launchSite: COMMON_LAUNCH_SITES.KSC,
+  vehicle: COMMON_VEHICLES.FALCON_9,
+  dateRange: { start: new Date(), end: new Date(Date.now() + 7 * 86_400_000) },
+  constraints: { maxWeatherRisk: 'medium' },
+  // weather: HourlyWeather[]  — optional forecast; climatology otherwise
+} as const
 
-# Linting
-bun run lint
-
-# Code formatting
-bun run format
+const analysis = orbitalEngine.analyzeMission(input)  // feasibility issues, period, J2 drift, azimuths
+const windows = orbitalEngine.calculateLaunchWindows(input)
+// windows[i]: start / optimal / end, azimuth, branch, weather (factors + risk),
+//             lighting, insertion point, trajectory, visibilityRegions, quality + scoreBreakdown
 ```
 
-### Code Style
-- TypeScript with strict mode enabled
-- ESLint and Prettier configured
-- Comprehensive test coverage with Bun's test runner
-- Detailed documentation
+For SSO missions set `orbit.ltan` (local time of ascending node, hours); the plane is tied to the Sun's right ascension. `CalculationInputSchema` (Zod) validates untrusted input.
 
-## 📊 Performance
+## Model and limits
 
-### Optimizations Implemented
-- **Bun Runtime**: 10-100x faster package installation and execution
-- **Web Workers**: Offload orbital calculations from main thread
-- **Code Splitting**: Dynamic imports for heavy components
-- **Caching**: Frequently used calculations cached
-- **Virtualization**: Efficient rendering of large datasets
+Circular orbits; two-body motion with J2 secular nodal precession; IAU-1982 GMST; low-precision solar ephemeris (~0.01°). Windows are centred on the in-plane time with width set by an allowable RAAN error (default ±2° LEO, ±1° polar, ±0.5° SSO). The ascent is a smooth great-circle profile, not a simulated trajectory, and the azimuth corridors and weather limits are representative, not official range rules. Results are for planning and education, **not operational use**.
 
-### Bun Performance Benefits
-- **Installation**: 0.5-2 seconds vs 30-90 seconds with npm
-- **TypeScript**: No compilation step needed, runs directly
-- **Testing**: Built-in test runner with instant feedback
-- **Development**: Hot reload 2-5x faster than Node.js
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for design details.
 
-## 🤝 Contributing
+## License
 
-We welcome contributions! Please see our contributing guidelines:
-1. Fork the repository
-2. Create a feature branch
-3. Make changes with tests
-4. Submit pull request
-
-### Development Standards
-- Write comprehensive tests using Bun's test runner
-- Document public APIs
-- Follow TypeScript best practices
-- Maintain code style consistency
-- Leverage Bun's performance optimizations
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 📞 Support
-
-- **Documentation**: [docs.aperture.space](https://docs.aperture.space)
-- **Issues**: [GitHub Issues](https://github.com/your-org/aperture/issues)
-- **Email**: support@aperture.space
-
-## 🙏 Acknowledgments
-
-- `satellite.js` for SGP4/SDP4 orbital propagation
-- NASA for orbital mechanics references
-- SpaceX for inspiration and real-world validation data
-- The Bun team for the incredible JavaScript runtime
-- The open-source community for amazing tools and libraries
-
----
-
-<div align="center">
-
-**Made with ❤️ for space exploration**
-
-*"The important achievement of Apollo was demonstrating that humanity is not forever chained to this planet and our visions go rather further than that and our opportunities are unlimited."* - Neil Armstrong
-
-</div>
+MIT

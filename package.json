@@ -1,16 +1,17 @@
 {
   "name": "aperture",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Orbital launch window planning tool",
   "private": true,
   "scripts": {
+    "setup": "bash install.sh",
     "dev": "cd apps/launch-watcher && bun run dev",
     "build": "cd packages/orbital-core && bun run build && cd ../../apps/launch-watcher && bun run build",
-    "test": "cd packages/orbital-core && bun run test",
-    "test:watch": "cd packages/orbital-core && bun run test:watch",
+    "test": "cd packages/orbital-core && bun test",
+    "type-check": "cd packages/orbital-core && bun run type-check && cd ../../apps/launch-watcher && bun run type-check",
+    "check": "bun run type-check && bun run test && bun run build",
     "clean": "rm -rf packages/orbital-core/node_modules packages/orbital-core/dist apps/launch-watcher/node_modules apps/launch-watcher/dist"
   },
-  "packageManager": "bun@1.0.0",
   "engines": {
     "bun": ">=1.0.0"
   }
