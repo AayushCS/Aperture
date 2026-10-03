@@ -1,0 +1,51 @@
+{
+  "name": "@aperture/orbital-core",
+  "version": "0.1.0",
+  "description": "High-performance orbital mechanics engine in TypeScript",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write \"src/**/*.{ts,tsx,json,md}\"",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "satellite.js": "^4.1.1",
+    "date-fns": "^3.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3",
+    "bun-types": "^1.2.4",
+    "eslint": "^9.17.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.1",
+    "@typescript-eslint/parser": "^8.18.1",
+    "prettier": "^3.4.2",
+    "eslint-config-prettier": "^10.0.1"
+  },
+  "keywords": [
+    "orbital",
+    "mechanics",
+    "astronomy",
+    "satellite",
+    "launch",
+    "window"
+  ],
+  "author": "Aperture Team",
+  "license": "MIT"
+}
