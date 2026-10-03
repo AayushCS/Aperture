@@ -185,9 +185,6 @@ export default function LaunchPlanner() {
             </CardBody>
           </Card>
 
-          <OrbitTrafficPanel altitude={screeningAltitude} inclination={mission.inclination} screening={screening} />
-
-          {focus && <WindowDetail window={focus} selected={focus.id === selectedWindowId} screen={screening.results[focus.id]} screeningStatus={screening.status} />}
         </div>
       </div>
 
@@ -206,7 +203,7 @@ export default function LaunchPlanner() {
             </Button>
           }
         />
-        <div className="mt-3 max-h-[560px] overflow-y-auto">
+        <div className="mt-3 max-h-[720px] overflow-y-auto">
           {windows.length > 0 ? (
             <WindowTable windows={windows} selectedId={focus?.id} onSelect={selectWindow} caption="Calculated launch windows" screening={screening} />
           ) : (
@@ -214,6 +211,12 @@ export default function LaunchPlanner() {
           )}
         </div>
       </Card>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <OrbitTrafficPanel altitude={screeningAltitude} inclination={mission.inclination} screening={screening} />
+
+        {focus && <WindowDetail window={focus} selected={focus.id === selectedWindowId} screen={screening.results[focus.id]} screeningStatus={screening.status} />}
+      </div>
     </div>
   )
 }
