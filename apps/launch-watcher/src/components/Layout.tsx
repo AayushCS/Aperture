@@ -1,6 +1,9 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { CalendarClock, Globe2, Radar } from 'lucide-react'
 import { cn } from '@/utils/cn'
+import OrbitBackdrop from './OrbitBackdrop'
+import SatelliteInspector from './SatelliteInspector'
+import { SiteDialog } from './SiteWidget'
 
 const NAV = [
   { to: '/', label: 'Launch Watch', icon: Radar, end: true },
@@ -10,7 +13,9 @@ const NAV = [
 
 export default function Layout() {
   return (
-    <div className="flex min-h-screen flex-col">
+    <>
+    <OrbitBackdrop />
+    <div className="relative z-10 flex min-h-screen flex-col">
       <a
         href="#main"
         className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
@@ -18,11 +23,12 @@ export default function Layout() {
         Skip to content
       </a>
 
-      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-background/60 backdrop-blur-xl">
         <div className="container flex h-14 items-center gap-6">
           <NavLink to="/" className="flex items-center gap-2.5" aria-label="Aperture home">
             <img src="/favicon.svg" alt="" className="size-7" />
             <span className="text-sm font-semibold tracking-tight">Aperture</span>
+            <span className="hidden rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground md:inline">Nova Scotia</span>
           </NavLink>
 
           <nav aria-label="Primary" className="flex items-center gap-1 overflow-x-auto">
@@ -53,16 +59,19 @@ export default function Layout() {
 
       <footer className="border-t">
         <div className="container flex flex-col gap-1 py-4 text-[11px] text-muted-foreground sm:flex-row sm:justify-between">
-          <span>Aperture launch window planner · planning estimates, not for operational use</span>
+          <span>Aperture · Spaceport Nova Scotia launch planner · hypothetical mission, planning estimates only</span>
           <span>
             Weather:{' '}
             <a className="underline-offset-2 hover:underline" href="https://open-meteo.com/" target="_blank" rel="noreferrer">
               Open-Meteo
             </a>{' '}
-            · Map data: Natural Earth
+            · Map data: Natural Earth · TLEs: CelesTrak format
           </span>
         </div>
       </footer>
     </div>
+    <SatelliteInspector />
+    <SiteDialog />
+    </>
   )
 }

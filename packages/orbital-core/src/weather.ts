@@ -142,6 +142,14 @@ const CLIMATE: Record<ClimateZone, ClimateProfile> = {
     convectionPeak: 15,
     morningFog: 10,
   },
+  // Atlantic Nova Scotia: windy winters, frequent spring/summer sea fog, few thunderstorms
+  'north-atlantic-coastal': {
+    wind: [17, 17, 16, 14, 12, 11, 10, 10, 12, 14, 16, 17],
+    cloud: [70, 66, 64, 64, 66, 68, 66, 60, 56, 60, 70, 72],
+    convection: [0.03, 0.02, 0.02, 0.02, 0.03, 0.05, 0.07, 0.07, 0.05, 0.04, 0.04, 0.03],
+    convectionPeak: 15,
+    morningFog: 25,
+  },
 }
 
 /** Infer a climate zone from latitude when the site does not specify one */

@@ -67,6 +67,77 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Frosted panels used by cards, dialogs and widgets */
+  .glass-panel {
+    background: linear-gradient(160deg, hsl(222 40% 10% / 0.82), hsl(225 45% 6% / 0.78));
+    border: 1px solid hsl(210 40% 96% / 0.07);
+    box-shadow:
+      0 0 0 1px hsl(199 89% 56% / 0.03) inset,
+      0 1px 0 hsl(210 40% 96% / 0.05) inset,
+      0 18px 40px -20px rgb(0 0 0 / 0.7);
+    backdrop-filter: blur(14px) saturate(1.2);
+  }
+
+  .glass-chip {
+    background: hsl(222 40% 8% / 0.7) !important;
+    border: 1px solid hsl(210 40% 96% / 0.08);
+    backdrop-filter: blur(10px);
+  }
+
+  /* Tiny procedural star field */
+  .starfield {
+    background-image:
+      radial-gradient(1px 1px at 12% 18%, #fff8 50%, transparent 51%),
+      radial-gradient(1px 1px at 72% 12%, #fff6 50%, transparent 51%),
+      radial-gradient(1px 1px at 38% 66%, #fff5 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 86% 74%, #fff7 50%, transparent 51%),
+      radial-gradient(1px 1px at 22% 88%, #fff4 50%, transparent 51%),
+      radial-gradient(1px 1px at 58% 38%, #fff5 50%, transparent 51%),
+      radial-gradient(1px 1px at 92% 44%, #fff4 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 6% 52%, #fff6 50%, transparent 51%);
+    background-size: 240px 240px;
+    animation: twinkle 6s ease-in-out infinite alternate;
+  }
+
+  /* Animated gradient border used on hero widgets */
+  .glow-border {
+    position: relative;
+  }
+  .glow-border::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--angle, 0deg), transparent 0 70%, hsl(199 89% 60% / 0.7), hsl(265 89% 75% / 0.7), transparent);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: spin-border 6s linear infinite;
+    pointer-events: none;
+  }
+}
+
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes spin-border {
+  to {
+    --angle: 360deg;
+  }
+}
+
+@keyframes twinkle {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 0.8;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

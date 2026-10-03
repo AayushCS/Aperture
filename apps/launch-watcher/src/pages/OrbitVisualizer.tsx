@@ -1,52 +1,42 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Globe2, Info } from 'lucide-react'
-import type { OrbitType } from '@aperture/orbital-core'
+import { ArrowRight, Globe2, Info, Orbit, Satellite } from 'lucide-react'
 import { useMissionPlan } from '@/hooks/useMissionPlan'
+import { useMissionStore } from '@/store/mission'
 import MissionHeading from '@/components/MissionHeading'
 import OrbitGlobe from '@/components/OrbitGlobe'
 import IssueList from '@/components/IssueList'
+import EllipseDiagram from '@/components/EllipseDiagram'
+import CatalogList from '@/components/CatalogList'
+import { SiteCard } from '@/components/SiteWidget'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import { Stat } from '@/components/ui/Badge'
-import { buttonVariants } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
+import { CLASS_COLOR } from '@/data/catalog'
+import { CLASS_LABEL, hhmm } from '@/lib/orbitStats'
 import { fmt } from '@/lib/format'
-
-const ORBIT_NOTES: Record<OrbitType, { uses: string; physics: string }> = {
-  LEO: {
-    uses: 'Crew and cargo to space stations, broadband constellations, technology demonstrations.',
-    physics:
-      'The orbital plane is fixed in inertial space (apart from slow J2 drift), so Earth rotates the launch site under it once per day — that crossing is the launch window.',
-  },
-  POLAR: {
-    uses: 'Weather, reconnaissance and mapping satellites that must overfly the entire globe.',
-    physics:
-      'Near 90° the plane barely precesses. The site passes under it twice a day — once heading north, once south — giving two daily opportunities.',
-  },
-  SSO: {
-    uses: 'Earth observation and imaging that needs consistent lighting at every pass.',
-    physics:
-      "A slightly retrograde inclination makes Earth's equatorial bulge rotate the plane 0.9856°/day — matching the Sun — so the window occurs at the same local solar time daily.",
-  },
-}
 
 export default function OrbitVisualizer() {
   const plan = useMissionPlan()
-  const { mission, analysis, focus, site } = plan
-  const notes = ORBIT_NOTES[mission.orbitType]
+  const inspect = useMissionStore((s) => s.inspect)
+  const { mission, analysis, focus, site, orbit, tle } = plan
+  const [exaggerate, setExaggerate] = useState(true)
+  const color = CLASS_COLOR[analysis.orbitClass]
 
   return (
     <div className="space-y-6">
-      <MissionHeading plan={plan} eyebrow="Orbit visualiser" title={mission.name || 'Untitled mission'} />
+      <MissionHeading plan={plan} eyebrow="Orbit" title={mission.name || 'Untitled mission'} />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="xl:col-span-2 animate-in fade-in-0 zoom-in-[0.98] duration-500">
           <CardHeader
             icon={<Globe2 />}
-            title="Ascent and first orbits"
+            title="One orbit, seen from the ground"
             description={focus ? `Liftoff ${fmt.utcDateTime(focus.optimal)} · simulated from orbit insertion` : 'No window to visualise'}
           />
           <CardBody>
             {focus ? (
-              <OrbitGlobe site={site} window={focus} altitude={mission.altitude} inclination={mission.inclination} />
+              <OrbitGlobe site={site} window={focus} name={tle.name ?? 'Mission'} color={color} />
             ) : (
               <div className="space-y-4">
                 <IssueList issues={analysis.issues} />
@@ -59,33 +49,68 @@ export default function OrbitVisualizer() {
         </Card>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader title="Orbital elements" description="Circular orbit, two-body + J2 secular perturbation" />
-            <CardBody>
+          <Card className="animate-in fade-in-0 slide-in-from-right-4 duration-500">
+            <CardHeader
+              icon={<Orbit />}
+              title="The orbit in its plane"
+              description={`${CLASS_LABEL[analysis.orbitClass]} · from ${tle.name ?? 'TLE'}`}
+              action={
+                orbit.eccentricity < 0.05 && (
+                  <Button size="sm" variant="ghost" onClick={() => setExaggerate((v) => !v)} aria-pressed={exaggerate}>
+                    {exaggerate ? 'True shape' : 'Exaggerate'}
+                  </Button>
+                )
+              }
+            />
+            <CardBody className="space-y-4">
+              <div className="rounded-xl border border-white/5 bg-black/30 px-6 py-2">
+                <EllipseDiagram orbit={orbit} color={color} exaggerate={exaggerate && orbit.eccentricity < 0.05 ? 10 : 1} insertionTrueAnomaly={focus?.insertion.trueAnomaly} />
+              </div>
               <dl className="grid grid-cols-2 gap-2">
-                <Stat label="Altitude" value={fmt.km(mission.altitude)} />
-                <Stat label="Inclination" value={fmt.deg(mission.inclination, 2)} hint={mission.inclination > 90 ? 'Retrograde' : 'Prograde'} />
-                <Stat label="Period" value={`${analysis.periodMinutes.toFixed(1)} min`} />
-                <Stat label="Velocity" value={`${analysis.velocityKmS.toFixed(2)} km/s`} />
-                <Stat label="Node drift" value={`${analysis.nodalPrecessionDegDay.toFixed(3)}°/d`} />
-                <Stat label="SSO inclination" value={fmt.deg(analysis.sunSynchronousInclination, 2)} hint="At this altitude" />
-                {focus && <Stat label="RAAN at insertion" value={fmt.deg(focus.raan, 2)} />}
-                {focus && <Stat label="Flight azimuth" value={fmt.deg(focus.azimuth)} hint={`${focus.branch} pass`} />}
+                <Stat label="Perigee" value={fmt.km(analysis.perigeeAltitudeKm)} hint={`${analysis.perigeeVelocityKmS.toFixed(2)} km/s`} />
+                <Stat label="Apogee" value={fmt.km(analysis.apogeeAltitudeKm)} hint={`${analysis.apogeeVelocityKmS.toFixed(2)} km/s`} />
+                <Stat label="Inclination" value={fmt.deg(orbit.inclination, 2)} hint={orbit.inclination > 90 ? 'Retrograde' : 'Prograde'} />
+                <Stat label="Period" value={`${analysis.periodMinutes.toFixed(1)} min`} hint={`${analysis.revsPerDay.toFixed(2)} rev/day`} />
+                <Stat label="Node" value={analysis.sunSynchronous ? `LTAN ${hhmm(analysis.ltan)}` : `${analysis.nodalPrecessionDegDay.toFixed(2)}°/d`} hint={analysis.sunSynchronous ? 'Locked to the Sun' : 'J2 drift'} />
+                {focus ? (
+                  <Stat label="Insertion" value={fmt.km(focus.insertion.altitude)} hint={`ν ${fmt.angle(focus.insertion.trueAnomaly, 1)} (0° = perigee)`} />
+                ) : (
+                  <Stat label="Eccentricity" value={orbit.eccentricity.toFixed(5)} />
+                )}
               </dl>
+              <Button variant="secondary" className="w-full" onClick={() => inspect('mission')}>
+                <Satellite aria-hidden /> Inspect TLE
+              </Button>
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader icon={<Info />} title={`About ${mission.orbitType === 'SSO' ? 'sun-synchronous' : mission.orbitType === 'POLAR' ? 'polar' : 'low Earth'} orbits`} />
+          <Card className="animate-in fade-in-0 slide-in-from-right-4 duration-700">
+            <CardHeader icon={<Info />} title="Why the ground track moves" />
             <CardBody className="space-y-3 text-sm leading-relaxed text-muted-foreground">
-              <p>{notes.physics}</p>
               <p>
-                <span className="font-medium text-foreground">Typical uses: </span>
-                {notes.uses}
+                There is one orbit: an ellipse almost fixed in space. Earth rotates under it, so each revolution passes{' '}
+                <span className="font-medium text-foreground">{fmt.deg(analysis.groundTrackShiftDeg, 1)}</span> further west. Add revolutions
+                in <span className="font-medium text-foreground">Layers</span> to watch it happen.
               </p>
+              {analysis.sunSynchronous && (
+                <p>
+                  The {orbit.inclination.toFixed(2)}° retrograde tilt makes Earth's bulge turn the plane 0.9856°/day, matching the Sun. The
+                  satellite always crosses the equator northbound at {hhmm(analysis.ltan)} local time.
+                </p>
+              )}
             </CardBody>
           </Card>
         </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <SiteCard opportunities={analysis.opportunities} className="self-start" />
+        <Card className="lg:col-span-2">
+          <CardHeader icon={<Satellite />} title="Canadian satellites" description="Shown on the globe at their altitude. Click to inspect, or target one's orbit." />
+          <CardBody>
+            <CatalogList />
+          </CardBody>
+        </Card>
       </div>
     </div>
   )

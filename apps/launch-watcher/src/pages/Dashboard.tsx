@@ -1,7 +1,12 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, Compass, Eye, MapPinned, Radar, Rocket, Satellite } from 'lucide-react'
-import type { LaunchWindow } from '@aperture/orbital-core'
-import { useMissionPlan } from '@/hooks/useMissionPlan'
+import { ArrowRight, Compass, Eye, FileCode2, MapPinned, Orbit, Radar, Rocket, Satellite } from 'lucide-react'
+import { formatTle, type LaunchWindow } from '@aperture/orbital-core'
+import { useMissionPlan, type MissionPlan } from '@/hooks/useMissionPlan'
+import EllipseDiagram from '@/components/EllipseDiagram'
+import CatalogList from '@/components/CatalogList'
+import { SiteCard } from '@/components/SiteWidget'
+import { CLASS_COLOR } from '@/data/catalog'
+import { CLASS_LABEL, ageLabel, hhmm } from '@/lib/orbitStats'
 import MissionHeading from '@/components/MissionHeading'
 import CountdownTimer from '@/components/CountdownTimer'
 import WeatherPanel from '@/components/WeatherPanel'
@@ -49,7 +54,7 @@ export default function Dashboard() {
       ) : (
         <>
           <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+            <Card className="glow-border lg:col-span-2 animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
               <CardHeader
                 icon={<Rocket />}
                 title="Next launch window"
@@ -71,6 +76,26 @@ export default function Dashboard() {
               <CardHeader icon={<Satellite />} title="Weather at T-0" description="Launch-commit criteria for the next window" />
               <CardBody>
                 <WeatherPanel weather={next.weather} />
+              </CardBody>
+            </Card>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <MissionOrbitWidget plan={plan} />
+            <SiteCard opportunities={analysis.opportunities} className="h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-700" />
+            <Card className="animate-in fade-in-0 slide-in-from-bottom-2 duration-1000">
+              <CardHeader
+                icon={<Satellite />}
+                title="Canadian satellites"
+                description="Click one to inspect its TLE"
+                action={
+                  <Link to="/orbit" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
+                    Globe <ArrowRight aria-hidden />
+                  </Link>
+                }
+              />
+              <CardBody className="pt-3">
+                <CatalogList limit={5} />
               </CardBody>
             </Card>
           </div>
@@ -157,5 +182,55 @@ function ViewingGuide({ window: w }: { window: LaunchWindow }) {
         <p className="rounded-lg bg-secondary/60 p-3 text-xs leading-relaxed text-muted-foreground">{tip}</p>
       </CardBody>
     </Card>
+  )
+}
+
+/** Clickable mission-orbit widget: TLE at a glance, orbit shape, opens the inspector */
+function MissionOrbitWidget({ plan }: { plan: MissionPlan }) {
+  const inspect = useMissionStore((s) => s.inspect)
+  const { analysis, orbit, tle } = plan
+  const color = CLASS_COLOR[analysis.orbitClass]
+  const [l1, l2] = formatTle(tle)
+  const age = (Date.now() - orbit.epoch.getTime()) / 86_400_000
+  return (
+    <button
+      type="button"
+      onClick={() => inspect('mission')}
+      aria-haspopup="dialog"
+      className="glass-panel group relative overflow-hidden rounded-xl p-5 text-left transition-all animate-in fade-in-0 slide-in-from-bottom-2 duration-500 hover:-translate-y-0.5 hover:border-violet-400/40 hover:shadow-lg hover:shadow-violet-500/10"
+    >
+      <div className="pointer-events-none absolute -left-10 -top-10 size-40 rounded-full bg-violet-500/10 blur-2xl" />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-violet-300">
+          <Orbit className="size-3.5" aria-hidden /> Mission orbit
+        </div>
+        <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ color, backgroundColor: `${color}22` }}>
+          {analysis.orbitClass}
+        </span>
+      </div>
+      <div className="mt-2 flex items-center gap-4">
+        <div className="w-28 shrink-0">
+          <EllipseDiagram orbit={orbit} color={color} size={120} labels={false} exaggerate={orbit.eccentricity < 0.05 ? 10 : 1} />
+        </div>
+        <div className="min-w-0 space-y-1 text-sm">
+          <div className="truncate font-semibold">{tle.name ?? `#${tle.catalogNumber}`}</div>
+          <div className="tabular text-xs text-muted-foreground">
+            {Math.round(analysis.perigeeAltitudeKm)} × {Math.round(analysis.apogeeAltitudeKm)} km · {orbit.inclination.toFixed(2)}°
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {CLASS_LABEL[analysis.orbitClass]}
+            {analysis.sunSynchronous && ` · ${hhmm(analysis.ltan + 12)} descending`}
+          </div>
+          <div className="text-[11px] text-muted-foreground">TLE {ageLabel(age)}</div>
+        </div>
+      </div>
+      <div className="mt-3 overflow-hidden rounded-md bg-black/40 px-2 py-1.5 font-mono text-[9.5px] leading-snug text-slate-400">
+        <div className="truncate">{l1}</div>
+        <div className="truncate">{l2}</div>
+      </div>
+      <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground transition-colors group-hover:text-violet-300">
+        <FileCode2 className="size-3" aria-hidden /> Inspect TLE →
+      </div>
+    </button>
   )
 }

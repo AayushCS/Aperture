@@ -4,23 +4,32 @@ import {
   COMMON_VEHICLES,
   nextWindow,
   orbitalEngine,
+  parseTle,
+  tleToElements,
   type CalculationInput,
   type LaunchSite,
   type LaunchWindow,
   type MissionAnalysis,
+  type OrbitalElements,
+  type Tle,
   type VehicleParams,
 } from '@aperture/orbital-core'
-import { useMissionStore, type MissionProfile } from '@/store/mission'
+import { DEFAULT_MISSION, useMissionStore, type MissionProfile } from '@/store/mission'
 import { useForecast } from './useForecast'
+
+/** The only launch site */
+export const SITE: LaunchSite = COMMON_LAUNCH_SITES.SPACEPORT_NOVA_SCOTIA
 
 export interface MissionPlan {
   mission: MissionProfile
   site: LaunchSite
   vehicle: VehicleParams
+  tle: Tle
+  orbit: OrbitalElements
   input: CalculationInput
   analysis: MissionAnalysis
   windows: LaunchWindow[]
-  /** Next window that has not closed yet */
+  /** Next window that has not closed yet (relative to the search start when it is in the future) */
   next: LaunchWindow | undefined
   /** Selected window, falling back to the next one */
   focus: LaunchWindow | undefined
@@ -36,19 +45,21 @@ function startOfSearch(startDate: string): Date {
   return new Date(Date.now() - 60 * 60 * 1000)
 }
 
-export function buildInput(mission: MissionProfile, weather?: CalculationInput['weather']): CalculationInput {
+export function parseMissionTle(text: string): Tle {
+  const r = parseTle(text)
+  if (r.ok) return r.tle
+  // The store only commits valid TLEs; this is a last-resort guard
+  const fallback = parseTle(DEFAULT_MISSION.tle)
+  if (!fallback.ok) throw new Error('Built-in mission TLE is invalid')
+  return fallback.tle
+}
+
+export function buildInput(mission: MissionProfile, orbit: OrbitalElements, weather?: CalculationInput['weather']): CalculationInput {
   const start = startOfSearch(mission.startDate)
   return {
-    orbit: {
-      type: mission.orbitType,
-      altitude: mission.altitude,
-      inclination: mission.inclination,
-      raan: mission.raan,
-      raanEpoch: new Date('2026-01-01T00:00:00Z'),
-      ltan: mission.ltan,
-    },
+    orbit,
     vehicle: COMMON_VEHICLES[mission.vehicleId],
-    launchSite: COMMON_LAUNCH_SITES[mission.siteId],
+    launchSite: SITE,
     dateRange: { start, end: new Date(start.getTime() + mission.spanDays * 86_400_000) },
     constraints: { daylightOnly: mission.daylightOnly, maxWeatherRisk: mission.maxWeatherRisk },
     weather,
@@ -59,23 +70,25 @@ export function buildInput(mission: MissionProfile, weather?: CalculationInput['
 export function useMissionPlan(): MissionPlan {
   const mission = useMissionStore((s) => s.mission)
   const selectedId = useMissionStore((s) => s.selectedWindowId)
-  const site = COMMON_LAUNCH_SITES[mission.siteId]
   const vehicle = COMMON_VEHICLES[mission.vehicleId]
-  const forecastQuery = useForecast(site)
+  const forecastQuery = useForecast(SITE)
 
   const computed = useMemo(() => {
-    const input = buildInput(mission, forecastQuery.data)
+    const tle = parseMissionTle(mission.tle)
+    const orbit = tleToElements(tle)
+    const input = buildInput(mission, orbit, forecastQuery.data)
     const analysis = orbitalEngine.analyzeMission(input)
     const windows = analysis.feasible ? orbitalEngine.calculateLaunchWindows(input) : []
-    return { input, analysis, windows }
+    return { tle, orbit, input, analysis, windows }
   }, [mission, forecastQuery.data])
 
-  const next = nextWindow(computed.windows)
+  const now = new Date()
+  const next = nextWindow(computed.windows, now > computed.input.dateRange.start ? now : computed.input.dateRange.start)
   const focus = computed.windows.find((w) => w.id === selectedId) ?? next
 
   return {
     mission,
-    site,
+    site: SITE,
     vehicle,
     ...computed,
     next,
