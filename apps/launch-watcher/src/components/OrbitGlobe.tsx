@@ -4,6 +4,7 @@ import { Crosshair, Expand, Layers, Minus, Pause, Play, Plus, RotateCcw, Shrink 
 import {
   EARTH_RADIUS_KM,
   anomalisticPeriod,
+  gmst,
   groundTrack,
   orbitRing,
   propagate,
@@ -26,6 +27,8 @@ const SPEEDS = [
 ] as const
 
 const VIEWS = [
+  // Space-fixed (inertial): the orbit stays put and Earth turns underneath it
+  { value: 'space', label: 'Space' },
   { value: 'follow', label: 'Follow' },
   { value: 'site', label: 'Site' },
   { value: 'free', label: 'Free' },
@@ -95,13 +98,15 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
   const speed = String(settings.speed) as (typeof SPEEDS)[number]['value']
 
   const [playing, setPlaying] = useState(() => !reducedMotion())
-  const [view, setView] = useState<View>('follow')
+  const [view, setView] = useState<View>('space')
   const [elapsed, setElapsed] = useState(0)
   const [showLayers, setShowLayers] = useState(false)
   const [hover, setHover] = useState<HitTarget | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const elapsedRef = useRef(0)
   const camRef = useRef<Camera>({ lon: site.longitude, lat: site.latitude * 0.6, zoom: 1 })
+  /** Space view: camera direction fixed in inertial space (right ascension / declination, deg) */
+  const spaceRef = useRef({ ra: site.longitude + gmst(w.insertion.time), dec: site.latitude * 0.6 })
   const hitsRef = useRef<HitTarget[]>([])
   const dragRef = useRef<{ x: number; y: number; moved: number } | null>(null)
 
@@ -126,6 +131,11 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
     setElapsed(0)
   }, [w.id, revolutions])
 
+  // Space view starts looking at Canso at the moment of insertion
+  useEffect(() => {
+    spaceRef.current = { ra: site.longitude + gmst(w.insertion.time), dec: site.latitude * 0.6 }
+  }, [w.id, w.insertion.time, site])
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
@@ -145,7 +155,11 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
     const simTime = new Date(w.insertion.time.getTime() + elapsedRef.current * 1000)
     const sat = propagate(orbit, simTime)
     const cam = camRef.current
-    if (view === 'follow') {
+    if (view === 'space') {
+      // Fixed inertial direction → Earth-fixed longitude drifts west as Earth rotates
+      cam.lon = ((spaceRef.current.ra - gmst(simTime)) % 360 + 540) % 360 - 180
+      cam.lat = spaceRef.current.dec
+    } else if (view === 'follow') {
       cam.lon = sat.longitude
       cam.lat = sat.latitude * 0.6
     } else if (view === 'site') {
@@ -380,6 +394,14 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
     draw()
   }
   function rotateBy(dLon: number, dLat: number) {
+    if (view === 'space') {
+      // Dragging in space view turns the camera, not the Earth
+      const sp = spaceRef.current
+      sp.ra += dLon
+      sp.dec = Math.max(-89, Math.min(89, sp.dec + dLat))
+      draw()
+      return
+    }
     setView('free')
     const cam = camRef.current
     cam.lon = ((cam.lon + dLon + 540) % 360) - 180
@@ -479,7 +501,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
           <Segmented label="Simulation speed" value={speed} options={SPEEDS} onChange={(v) => setGlobe({ speed: Number(v) })} className="glass-chip w-52 rounded-lg" />
         </div>
         <div className="absolute right-3 top-3 flex flex-col items-end gap-2">
-          <Segmented label="Camera" value={view} options={VIEWS} onChange={setView} className="glass-chip w-44 rounded-lg" />
+          <Segmented label="Camera" value={view} options={VIEWS} onChange={setView} className="glass-chip w-56 rounded-lg" />
           <div className="relative">
             <Button variant="secondary" size="sm" className="glass-chip" onClick={() => setShowLayers((s) => !s)} aria-expanded={showLayers} aria-controls="globe-layers">
               <Layers aria-hidden /> Layers
@@ -517,7 +539,9 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
               label: 'Reset view',
               fn: () => {
                 camRef.current.zoom = 1
-                setView('follow')
+                spaceRef.current = { ra: site.longitude + gmst(w.insertion.time), dec: site.latitude * 0.6 }
+                setView('space')
+                draw()
               },
             },
             { icon: <Crosshair aria-hidden />, label: 'Centre on site', fn: () => setView('site') },
@@ -532,7 +556,7 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
             </Button>
           ))}
         </div>
-        <p className="pointer-events-none absolute bottom-3 left-3 hidden text-[10px] text-slate-400/80 sm:block">Drag to rotate · scroll to zoom · click the satellite or the site</p>
+        <p className="pointer-events-none absolute bottom-3 left-3 hidden text-[10px] text-slate-400/80 sm:block">{view === 'space' ? 'Space view: the orbit is fixed — Earth turns under it · ' : ''}Drag to rotate · scroll to zoom · click the satellite or the site</p>
       </div>
 
       <dl className="tabular grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
