@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
   COMMON_LAUNCH_SITES,
   COMMON_VEHICLES,
@@ -15,6 +15,7 @@ import {
   type VehicleParams,
 } from '@aperture/orbital-core'
 import { useMissionStore, type MissionProfile } from '@/store/mission'
+import { requestScreening, useScreeningStore, type ScreeningState } from '@/store/screening'
 import { useForecast } from './useForecast'
 
 /** The only launch site */
@@ -36,6 +37,10 @@ export interface MissionPlan {
   /** Selected window, falling back to the next one */
   focus: LaunchWindow | undefined
   forecast: { status: 'loading' | 'live' | 'unavailable'; updatedAt?: Date }
+  /** Post-insertion conjunction screen, filled in progressively by a background worker */
+  screening: ScreeningState
+  /** Altitude used by traffic / conjunction screening (km). Exact for circular orbits; mean of perigee and apogee otherwise */
+  screeningAltitude: number
 }
 
 function startOfSearch(startDate: string): Date {
@@ -97,6 +102,13 @@ export function useMissionPlan(): MissionPlan {
     return { input, analysis, windows, orbit: input.orbit }
   }, [mission, forecastQuery.data])
 
+  // The screen flies a circular orbit; for elliptical targets it uses the mean altitude (approximation)
+  const screeningAltitude = Math.round((mission.perigee + mission.apogee) / 2)
+  const screening = useScreeningStore()
+  useEffect(() => {
+    requestScreening({ altitude: screeningAltitude, inclination: mission.inclination }, computed.windows)
+  }, [screeningAltitude, mission.inclination, computed.windows])
+
   const now = new Date()
   const next = nextWindow(computed.windows, now > computed.input.dateRange.start ? now : computed.input.dateRange.start)
   const focus = computed.windows.find((w) => w.id === selectedId) ?? next
@@ -114,5 +126,7 @@ export function useMissionPlan(): MissionPlan {
       status: forecastQuery.isPending ? 'loading' : forecastQuery.data?.length ? 'live' : 'unavailable',
       updatedAt: forecastQuery.dataUpdatedAt ? new Date(forecastQuery.dataUpdatedAt) : undefined,
     },
+    screening,
+    screeningAltitude,
   }
 }

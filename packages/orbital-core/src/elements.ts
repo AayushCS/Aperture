@@ -6,7 +6,7 @@
  * Drag, higher harmonics, lunisolar and SGP4 periodic terms are not modelled.
  */
 import { EARTH_RADIUS_KM, J2, MU_EARTH, SECONDS_PER_DAY, SIDEREAL_RATE_DEG_DAY, SUN_RATE_DEG_DAY } from './constants'
-import { gmst, sunPosition } from './astro'
+import { gmst, meanSunRightAscension } from './astro'
 import { degToRad, normalizeAngle, radToDeg, solveKepler, wrap180 } from './math'
 import type { OrbitClass, OrbitalElements, PassBranch } from './types'
 
@@ -254,12 +254,12 @@ export function raanThroughPoint(
 /** Local mean solar time of the ascending node (h) */
 export function ltanAt(el: OrbitalElements, time: Date = el.epoch): number {
   const raan = elementsAt(el, time).raan
-  return (((12 + (raan - sunPosition(time).rightAscension) / 15) % 24) + 24) % 24
+  return (((12 + (raan - meanSunRightAscension(time)) / 15) % 24) + 24) % 24
 }
 
 /** RAAN (deg) that gives a local time of ascending node at `time` */
 export function raanForLtan(ltanHours: number, time: Date): number {
-  return normalizeAngle(sunPosition(time).rightAscension + (ltanHours - 12) * 15)
+  return normalizeAngle(meanSunRightAscension(time) + (ltanHours - 12) * 15)
 }
 
 /** Westward ground-track shift per revolution at the equator (deg) */

@@ -1,9 +1,16 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { COMMON_VEHICLES, shapeFromApsides, sunSynchronousInclinationFor, type VehicleId, type WeatherRisk } from '@aperture/orbital-core'
+import {
+  COMMON_VEHICLES,
+  ORBIT_ALTITUDE,
+  shapeFromApsides,
+  sunSynchronousInclinationFor,
+  type OrbitFamily,
+  type VehicleId,
+  type WeatherRisk,
+} from '@aperture/orbital-core'
 
-/** Orbit family chosen by the user */
-export type OrbitFamily = 'LEO' | 'POLAR' | 'SSO'
+export type { OrbitFamily }
 
 /**
  * The mission is one orbit, described by the user. The app designs it so a
@@ -44,11 +51,23 @@ export function ssoInclination(perigee: number, apogee: number): number {
   return Number(sunSynchronousInclinationFor(semiMajorAxis, eccentricity).toFixed(4))
 }
 
-/** Starting point per family — all reachable over open ocean from Canso */
+/** Starting point per family: circular at the family's default altitude (ORBIT_ALTITUDE); all reachable from Canso */
+const preset = (family: OrbitFamily, inclination: number) => {
+  const alt = ORBIT_ALTITUDE[family].defaultKm
+  return { perigee: alt, apogee: alt, inclination }
+}
 export const ORBIT_PRESETS: Record<OrbitFamily, Pick<MissionProfile, 'perigee' | 'apogee' | 'inclination'>> = {
-  LEO: { perigee: 450, apogee: 600, inclination: 51.6 },
-  POLAR: { perigee: 600, apogee: 600, inclination: 90 },
-  SSO: { perigee: 500, apogee: 800, inclination: ssoInclination(500, 800) },
+  LEO: preset('LEO', 51.6),
+  POLAR: preset('POLAR', 90),
+  SSO: preset('SSO', ssoInclination(ORBIT_ALTITUDE.SSO.defaultKm, ORBIT_ALTITUDE.SSO.defaultKm)),
+}
+
+/** Keep perigee / apogee inside the family's allowed altitude range */
+export function clampAltitudes(family: OrbitFamily, perigee: number, apogee: number): { perigee: number; apogee: number } {
+  const { min, max } = ORBIT_ALTITUDE[family]
+  const clamp = (v: number) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : ORBIT_ALTITUDE[family].defaultKm))
+  const p = clamp(perigee)
+  return { perigee: p, apogee: Math.max(p, clamp(apogee)) }
 }
 
 export const ORBIT_LIMITS: Record<OrbitFamily, { minInc: number; maxInc: number }> = {
@@ -102,6 +121,7 @@ export const useMissionStore = create<MissionState>()(
       update: (patch) =>
         set((s) => {
           const mission = { ...s.mission, ...patch }
+          Object.assign(mission, clampAltitudes(mission.orbitType, mission.perigee, mission.apogee))
           // Keep SSO exactly sun-synchronous as the altitudes change
           if (mission.orbitType === 'SSO') mission.inclination = ssoInclination(mission.perigee, mission.apogee)
           return { mission, selectedWindowId: null }
@@ -126,9 +146,15 @@ export const useMissionStore = create<MissionState>()(
           m.orbitType in ORBIT_PRESETS &&
           m.vehicleId in COMMON_VEHICLES &&
           [m.perigee, m.apogee, m.inclination, m.raan, m.ltan].every((v) => typeof v === 'number' && Number.isFinite(v))
+        // Old saved altitudes may fall outside the per-orbit range: clamp them (and keep SSO sun-synchronous)
+        let mission = current.mission
+        if (valid) {
+          mission = { ...DEFAULT_MISSION, ...m, ...clampAltitudes(m.orbitType, m.perigee, m.apogee) }
+          if (mission.orbitType === 'SSO') mission.inclination = ssoInclination(mission.perigee, mission.apogee)
+        }
         return {
           ...current,
-          mission: valid ? { ...DEFAULT_MISSION, ...m } : current.mission,
+          mission,
           globe: p?.globe ? { ...DEFAULT_GLOBE, ...p.globe, layers: { ...DEFAULT_GLOBE.layers, ...p.globe.layers } } : current.globe,
         }
       },

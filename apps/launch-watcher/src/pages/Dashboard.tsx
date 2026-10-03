@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, Compass, Eye, FileCode2, MapPinned, Orbit, Radar, Rocket, Satellite } from 'lucide-react'
+import { ArrowRight, Compass, Eye, FileCode2, MapPinned, Orbit, Radar, Rocket, Satellite, ShieldAlert } from 'lucide-react'
 import { formatTle, type LaunchWindow } from '@aperture/orbital-core'
 import { useMissionPlan, type MissionPlan } from '@/hooks/useMissionPlan'
 import EllipseDiagram from '@/components/EllipseDiagram'
@@ -25,7 +25,8 @@ export default function Dashboard() {
   const plan = useMissionPlan()
   const selectWindow = useMissionStore((s) => s.selectWindow)
   const navigate = useNavigate()
-  const { analysis, windows, next, site, mission } = plan
+  const { analysis, windows, next, site, mission, screening } = plan
+  const nextScreen = next ? screening.results[next.id] : undefined
 
   return (
     <div className="space-y-6">
@@ -62,6 +63,14 @@ export default function Dashboard() {
               />
               <CardBody className="space-y-5">
                 <CountdownTimer window={next} />
+                {nextScreen?.blocked && (
+                  <p role="alert" className="flex gap-2.5 rounded-lg bg-nogo/10 px-3 py-2.5 text-sm text-red-200 ring-1 ring-inset ring-nogo/30">
+                    <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-nogo" />
+                    <span>
+                      Blocked — {nextScreen.reason}. <span className="text-muted-foreground">Simplified post-insertion screen.</span>
+                    </span>
+                  </p>
+                )}
                 <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <Stat label="Flight azimuth" value={fmt.deg(next.azimuth)} hint={`${compassPoint(next.azimuth)} · ${next.branch} pass`} />
                   <Stat label="Window width" value={fmt.duration(next.duration)} hint="In-plane ± tolerance" />
@@ -125,6 +134,7 @@ export default function Dashboard() {
                 windows={windows}
                 limit={7}
                 caption="Upcoming launch windows"
+                screening={screening}
                 selectedId={undefined}
                 onSelect={(id) => {
                   selectWindow(id)

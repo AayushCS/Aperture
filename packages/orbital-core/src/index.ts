@@ -2,7 +2,14 @@
  * Aperture Orbital Core — launch window planning engine.
  */
 import { OrbitalEngine } from './calculations'
-import type { LaunchSite, VehicleParams } from './types'
+import type { LaunchSite, OrbitFamily, VehicleParams } from './types'
+
+/** Default altitude and the "Advanced" slider range per orbit family (km) */
+export const ORBIT_ALTITUDE = {
+  LEO: { defaultKm: 500, min: 300, max: 1200 },
+  POLAR: { defaultKm: 700, min: 500, max: 1000 },
+  SSO: { defaultKm: 600, min: 500, max: 900 },
+} as const satisfies Record<OrbitFamily, { defaultKm: number; min: number; max: number }>
 
 export {
   OrbitalEngine,
@@ -20,6 +27,8 @@ export * from './orbit'
 export * from './tle'
 export * from './trajectory'
 export * from './weather'
+export * from './traffic'
+export * from './conjunction'
 export * from './constants'
 export * from './types'
 
@@ -85,8 +94,8 @@ export type VehicleId = keyof typeof COMMON_VEHICLES
  * catalog number 99901 is in the unassigned test range.
  */
 export const HYPOTHETICAL_MISSION_TLE = `APERTURE-1
-1 99901U 27999A   27335.00000000  .00000512  00000-0  21000-4 0    13
-2 99901  97.9787  44.3125 0213428 151.5401   0.0000 14.72546665    10`
+1 99901U 27999A   27335.00000000  .00000512  00000+0  21000-4 0    12
+2 99901  97.9787  47.1281 0213428 151.5401   0.0000 14.72546665    14`
 
 /** Shared engine instance */
 export const orbitalEngine = new OrbitalEngine()

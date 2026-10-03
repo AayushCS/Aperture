@@ -1,4 +1,5 @@
-import type { MissionAnalysis } from '@aperture/orbital-core'
+import { useState } from 'react'
+import { ORBIT_ALTITUDE, type MissionAnalysis } from '@aperture/orbital-core'
 import { ORBIT_LIMITS, useMissionStore, type OrbitFamily } from '@/store/mission'
 import { SliderField } from '@/components/ui/Form'
 import { hhmm } from '@/lib/orbitStats'
@@ -71,33 +72,60 @@ export default function OrbitForm({ analysis }: { analysis: MissionAnalysis }) {
   const mission = useMissionStore((s) => s.mission)
   const update = useMissionStore((s) => s.update)
   const limits = ORBIT_LIMITS[mission.orbitType]
+  const altRange = ORBIT_ALTITUDE[mission.orbitType]
+  const isDefault = mission.perigee === altRange.defaultKm && mission.apogee === altRange.defaultKm
+  const [advancedAlt, setAdvancedAlt] = useState(!isDefault)
 
   return (
     <div className="space-y-6">
       <FamilyPicker />
       <div className="grid gap-5 sm:grid-cols-2">
-        <SliderField
-          id="perigee"
-          label="Perigee altitude"
-          unit="km"
-          min={200}
-          max={1500}
-          step={5}
-          value={mission.perigee}
-          onChange={(v) => update({ perigee: v, apogee: Math.max(v, mission.apogee) })}
-          hint="Lowest point — the vehicle injects here"
-        />
-        <SliderField
-          id="apogee"
-          label="Apogee altitude"
-          unit="km"
-          min={200}
-          max={2000}
-          step={5}
-          value={mission.apogee}
-          onChange={(v) => update({ apogee: v, perigee: Math.min(v, mission.perigee) })}
-          hint={mission.apogee === mission.perigee ? 'Equal to perigee → circular' : `Elliptical, e = ${((mission.apogee - mission.perigee) / (mission.apogee + mission.perigee + 2 * 6378.137)).toFixed(4)}`}
-        />
+        <div className="space-y-2 sm:col-span-2">
+          {advancedAlt ? (
+            <div className="grid gap-5 sm:grid-cols-2">
+              <SliderField
+                id="perigee"
+                label="Perigee altitude"
+                unit="km"
+                min={altRange.min}
+                max={altRange.max}
+                step={5}
+                value={mission.perigee}
+                onChange={(v) => update({ perigee: v, apogee: Math.max(v, mission.apogee) })}
+                hint={`Lowest point — the vehicle injects here · default ${altRange.defaultKm} km`}
+              />
+              <SliderField
+                id="apogee"
+                label="Apogee altitude"
+                unit="km"
+                min={altRange.min}
+                max={altRange.max}
+                step={5}
+                value={mission.apogee}
+                onChange={(v) => update({ apogee: v, perigee: Math.min(v, mission.perigee) })}
+                hint={mission.apogee === mission.perigee ? 'Equal to perigee → circular' : `Elliptical, e = ${((mission.apogee - mission.perigee) / (mission.apogee + mission.perigee + 2 * 6378.137)).toFixed(4)}`}
+              />
+            </div>
+          ) : (
+            <div>
+              <span className="text-xs font-medium text-muted-foreground">Altitude</span>
+              <p className="text-sm">
+                {mission.perigee === mission.apogee ? `${mission.perigee} km` : `${mission.perigee} × ${mission.apogee} km`}{' '}
+                <span className="text-xs text-muted-foreground">{isDefault ? '(default)' : '(custom)'}</span>
+              </p>
+            </div>
+          )}
+          <button
+            type="button"
+            className="text-xs text-primary underline-offset-2 hover:underline"
+            onClick={() => {
+              if (advancedAlt) update({ perigee: altRange.defaultKm, apogee: altRange.defaultKm })
+              setAdvancedAlt((v) => !v)
+            }}
+          >
+            {advancedAlt ? 'Reset to default' : 'Advanced: change altitude'}
+          </button>
+        </div>
         {mission.orbitType === 'SSO' ? (
           <>
             <div className="space-y-1.5">

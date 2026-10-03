@@ -1,7 +1,7 @@
 # Architecture
 
 ```
-packages/orbital-core      Pure TypeScript engine (only dependency: zod)
+packages/orbital-core      Pure TypeScript engine (dependencies: zod, satellite.js)
   src/constants.ts         WGS-84, WGS-72 (TLE), μ, J2, Earth rotation
   src/tle.ts               TLE parse/validate/format, checksums, Kozai ↔ Brouwer
   src/elements.ts          Elliptical elements: J2 secular rates, propagate, ground
@@ -12,7 +12,9 @@ packages/orbital-core      Pure TypeScript engine (only dependency: zod)
                            solver, circular-orbit helpers
   src/trajectory.ts        Ascent profile, lighting, viewing footprints
   src/weather.ts           Launch-commit assessment, climatology model
-  src/calculations.ts      OrbitalEngine: analyzeMission, calculateLaunchWindows
+  src/calculations.ts      OrbitalEngine: designOrbit, analyzeMission, calculateLaunchWindows
+  src/traffic.ts           CelesTrak GP parsing, shell/inclination traffic counts
+  src/conjunction.ts       Post-insertion conjunction screen (SGP4 vs circular target orbit)
   test/engine.test.ts      Physics + behaviour tests (bun test)
 
 apps/launch-watcher        React 18 + Vite + Tailwind
@@ -21,8 +23,11 @@ apps/launch-watcher        React 18 + Vite + Tailwind
   src/lib/                 Formatting, d3-geo helpers (terminator, circles, tracks)
   src/components/          OrbitForm (LEO/Polar/SSO), TleDialog/TleView (generated TLE),
                            OrbitGlobe (canvas, 3D ring), OrbitBackdrop, EllipseDiagram,
-                           SiteWidget, CountdownTimer, WeatherPanel, ViewingMap, WindowTable
+                           SiteWidget, CountdownTimer, WeatherPanel, ViewingMap, WindowTable,
+                           OrbitTrafficPanel
+  src/workers/             conjunction.worker — runs the screen off the main thread
   src/pages/               Dashboard, LaunchPlanner, OrbitVisualizer
+scripts/                   fetch-active-satellites.ts → data/active.json (CelesTrak snapshot)
 ```
 
 ## Launch window algorithm
@@ -61,3 +66,9 @@ orbitalEngine ───────────────┘        (useMemo)
 ```
 
 Vite and TypeScript alias `@aperture/orbital-core` to the engine source, so there is no build step during development. Coarse land geometry (110m) ships with the app. The detailed 50m layer used by the regional map is lazy-loaded.
+
+## Conjunction screen
+
+A simplified, post-insertion screen based on the spherical miss distances in FAA 14 CFR 450.169: 25 km, or 200 km for ISS and Tiangong modules (CelesTrak names them `ISS (…)` and `CSS (…)`). For each window, the payload flies a circular orbit at the target altitude (the mean of perigee and apogee for elliptical targets — an approximation) for 3 h after insertion. Its RAAN is the window's RAAN at insertion, its phase comes from the insertion latitude, and J2 nodal drift is included. It is compared every 10 s against SGP4 propagations of snapshot objects whose perigee–apogee range is within ±50 km of the target altitude.
+
+Steps are skipped only when two objects provably cannot close the gap in time, because separation shrinks no faster than the sum of their speeds. Each candidate approach is then refined to the linear time of closest approach within ±1 step, so fast crossings between samples are not missed. The screen does not include the ascent, launch-time spread within the window, covariance, or element-set ageing. The UI only reads the saved snapshot.

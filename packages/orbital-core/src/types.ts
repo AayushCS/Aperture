@@ -1,6 +1,9 @@
 import { z } from 'zod'
 
-/** Orbit class inferred from the elements (never chosen by hand) */
+/** Orbit family the user chooses when designing a mission */
+export type OrbitFamily = 'LEO' | 'POLAR' | 'SSO'
+
+/** Orbit class inferred from the elements */
 export type OrbitClass = 'LEO' | 'POLAR' | 'SSO' | 'MEO' | 'GEO' | 'HEO'
 
 export type WeatherRisk = 'low' | 'medium' | 'high'
