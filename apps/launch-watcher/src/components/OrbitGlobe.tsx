@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { geoCircle, geoGraticule10, geoOrthographic, geoPath, type GeoPermissibleObjects } from 'd3-geo'
 import { Crosshair, Expand, Layers, Minus, Pause, Play, Plus, RotateCcw, Shrink } from 'lucide-react'
@@ -553,14 +554,20 @@ export default function OrbitGlobe({ site, window: w, name = 'Mission', color = 
       </div>
 
       <dl className="tabular grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
-        {[
+        {([
           ['Since insertion', fmt.duration(elapsed)],
           ['Revolution', `Rev ${revNo}`],
           ['Altitude', fmt.km(sat.altitude)],
           ['Speed', `${sat.speed.toFixed(2)} km/s`],
           ['Sub-satellite', `${fmt.lat(sat.latitude)} ${fmt.lon(sat.longitude)}`],
-          ['Sim time', fmt.utcTime(sat.time)],
-        ].map(([k, v]) => (
+          [
+            'Sim time',
+            <>
+            {fmt.utcTime(sat.time)}
+            <span className="block text-[11px] font-normal text-muted-foreground">{fmt.utcDate(sat.time)}</span>
+             </>,
+            ],
+        ] as Array<[string, ReactNode]>).map(([k, v]) => (
           <div key={k} className="rounded-lg border bg-background/40 px-3 py-2">
             <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">{k}</dt>
             <dd className="truncate font-semibold">{v}</dd>
