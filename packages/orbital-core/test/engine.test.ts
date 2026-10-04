@@ -711,7 +711,7 @@ describe('conjunction screen', () => {
   test('blocks a window when an object passes within 25 km', () => {
     const result = screenWindow(prepareScreeningObjects([omm('SAT A', 1, 0), omm('SAT B', 2, 180)], orbit.altitude), orbit, window)
     expect(result.blocked).toBe(true)
-    expect(result.reason).toMatch(/^collision risk: \d+\.\d km from SAT A$/)
+    expect(result.reason).toMatch(/^close approach: \d+\.\d km from SAT A \(limit 25 km\)$/)
     expect(result.closest!.distanceKm).toBeLessThan(25)
   })
 

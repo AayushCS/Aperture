@@ -64,10 +64,11 @@ export default function Dashboard() {
               <CardBody className="space-y-5">
                 <CountdownTimer window={next} />
                 {nextScreen?.blocked && (
-                  <p role="alert" className="flex gap-2.5 rounded-lg bg-nogo/10 px-3 py-2.5 text-sm text-red-200 ring-1 ring-inset ring-nogo/30">
-                    <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-nogo" />
+                  <p role="alert" className="flex gap-2.5 rounded-lg bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100 ring-1 ring-inset ring-amber-500/30">
+                    <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-400" />
                     <span>
-                      Blocked — {nextScreen.reason}. <span className="text-muted-foreground">Simplified post-insertion screen.</span>
+                      Close pass at nominal liftoff — {nextScreen.reason}.{' '}
+                      <span className="text-muted-foreground">A short hold would shift it; simplified screen, hold times not computed.</span>
                     </span>
                   </p>
                 )}

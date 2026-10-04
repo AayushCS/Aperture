@@ -107,15 +107,16 @@ function ConjunctionSummary({ screening }: { screening: ScreeningState }) {
           <span className="text-muted-foreground">No windows to screen.</span>
         ) : (
           <>
-            <span className={blocked ? 'font-semibold text-nogo' : 'font-semibold text-go'}>
+            <span className={blocked ? 'font-semibold text-amber-400' : 'font-semibold text-go'}>
               {blocked} of {results.length}
             </span>{' '}
-            screened windows blocked
+            windows have a close pass at nominal liftoff
             {screening.status === 'running' && <span className="text-muted-foreground"> · screening {results.length}/{screening.total}…</span>}
           </>
         )}
       </p>
       <p className="text-[11px] text-muted-foreground">Simplified screen based on FAA 450.169 distances, after orbit insertion only.</p>
+      <p className="text-[11px] text-muted-foreground">A short liftoff hold normally shifts a single close pass; hold times are not computed yet.</p>
       <p className="text-[11px] text-muted-foreground">
         Payload flown 3 h from insertion against objects within ±{SCREEN_DEFAULTS.altitudeBandKm} km (SGP4, {SCREEN_DEFAULTS.stepSec} s steps). Limits:{' '}
         {SCREEN_DISTANCE_KM.other} km, {SCREEN_DISTANCE_KM.habitable} km for ISS and Tiangong. Accuracy falls off as the snapshot ages.

@@ -43,7 +43,7 @@ export interface ClosestApproach {
 
 export interface ConjunctionScreen {
   blocked: boolean
-  /** e.g. "collision risk: 12.3 km from STARLINK-1234" */
+  /** e.g. "close approach: 12.3 km from STARLINK-1234 (limit 25 km)" */
   reason?: string
   /** Closest approach to any screened object (the violating one when blocked) */
   closest?: ClosestApproach
@@ -154,7 +154,7 @@ export function screenWindow(
     let best = Infinity
     let bestS = 0
 
-    for (let k = 0; k <= steps; ) {
+    for (let k = 0; k <= steps;) {
       const s = k * step
       const pv = sgp4(obj.satrec, minutesAt(s))
       if (!pv) break // decayed or diverged — no usable positions
@@ -200,7 +200,9 @@ export function screenWindow(
   const reported = violation ?? closest
   return {
     blocked: violation !== undefined,
-    reason: violation ? `collision risk: ${violation.distanceKm.toFixed(1)} km from ${violation.name}` : undefined,
+    reason: violation
+      ? `close approach: ${violation.distanceKm.toFixed(1)} km from ${violation.name} (limit ${violation.thresholdKm} km)`
+      : undefined,
     closest: reported,
     screened: objects.length,
   }

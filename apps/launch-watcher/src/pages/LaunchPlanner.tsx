@@ -254,7 +254,7 @@ function WindowDetail({
             hint={
               screen?.closest
                 ? `${screen.blocked ? screen.reason : `Closest ${screen.closest.distanceKm.toFixed(1)} km from ${screen.closest.name}`} at ${fmt.utcTime(screen.closest.time)}`
-                : '3 h after insertion · 25 km (200 km ISS/Tiangong)'
+                : 'Checked at nominal liftoff · 3 h after insertion · 25 km (200 km ISS/Tiangong)'
             }
           />
         </dl>

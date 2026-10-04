@@ -33,8 +33,8 @@ export function ScoreBar({ value }: { value: number }) {
 export function ScreenLabel({ screen, status }: { screen?: ConjunctionScreen; status: ScreeningState['status'] }) {
   if (screen?.blocked) {
     return (
-      <span className="block" title={screen.reason}>
-        <span className="rounded-full bg-nogo/10 px-2 py-0.5 text-[11px] font-semibold text-nogo ring-1 ring-inset ring-nogo/30">Blocked</span>
+      <span className="block" title={`${screen.reason} — at nominal liftoff`}>
+        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/30">Close pass</span>
         <span className="tabular mt-0.5 block max-w-[11rem] truncate text-[11px] text-muted-foreground">
           {screen.closest!.distanceKm.toFixed(1)} km · {screen.closest!.name}
         </span>

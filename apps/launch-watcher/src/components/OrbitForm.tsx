@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { ORBIT_ALTITUDE, ORBIT_PLANE, maxApogeeAltitude, normalizeAngle, type MissionAnalysis, type OrbitalElements } from '@aperture/orbital-core'
 import { SITE, type PlaneAnchor } from '@/hooks/useMissionPlan'
 import { ORBIT_LIMITS, ssoInclination, useMissionStore, type OrbitFamily } from '@/store/mission'
@@ -99,9 +100,9 @@ function PlaneDateField({ localDate }: { localDate?: string }) {
   const limits = searchDateLimits(new Date(), SITE.timeZone!)
   return (
     <Field
-      label="Plane date / search from"
+      label="Launch date / search from"
       htmlFor="plane-date"
-      hint={`${today ? 'Today — follows the clock (Canso date)' : 'Plane set on this Canso date · search starts 00:00 UTC'} · up to ${SEARCH_LIMIT_DAYS} days ahead`}
+      hint={`${today ? 'Today — follows the clock (Canso date)' : 'Search starts 00:00 UTC on this Canso date'} · up to ${SEARCH_LIMIT_DAYS} days ahead`}
     >
       <div className="flex gap-2">
         <input
@@ -129,99 +130,130 @@ function PlaneDateField({ localDate }: { localDate?: string }) {
 const planeDate = (localDate: string) =>
   new Date(`${localDate}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
-/** Orbit inputs for the chosen family. `orbit` is the designed target; `plane` anchors LEO / polar. */
+/**
+ * Orbit inputs for the chosen family. `orbit` is the designed target; `plane` anchors LEO / polar.
+ * Up front: orbit type and date. Everything else (altitudes, inclination, plane) sits under "Advanced".
+ */
 export default function OrbitForm({ analysis, orbit, plane }: { analysis: MissionAnalysis; orbit: OrbitalElements; plane?: PlaneAnchor }) {
   const mission = useMissionStore((s) => s.mission)
   const update = useMissionStore((s) => s.update)
+  const applyOrbitPreset = useMissionStore((s) => s.applyOrbitPreset)
+  const [advanced, setAdvanced] = useState(false)
   const family = mission.orbitType
   const alt = ORBIT_ALTITUDE[family]
   const apogeeMax = maxApogeeAltitude(family, mission.perigee)
   const circular = mission.apogee === mission.perigee
   const allowed = analysis.opportunities.find((o) => o.withinCorridor)
+  const shape = circular ? `${Math.round(mission.perigee)} km circular` : `${Math.round(mission.perigee)} × ${Math.round(mission.apogee)} km`
 
   return (
     <div className="space-y-6">
       <FamilyPicker />
+
       <div className="grid gap-5 sm:grid-cols-2">
-        <SliderField
-          id="perigee"
-          label="Perigee altitude"
-          unit="km"
-          min={alt.min}
-          max={alt.max}
-          step={10}
-          value={mission.perigee}
-          onChange={(perigee) => update({ perigee })}
-          hint={`${alt.min}–${alt.max.toLocaleString('en-US')} km · default ${alt.defaultKm} km`}
+        <PlaneDateField localDate={plane?.localDate} />
+        <ReadOnlyField
+          label="Target orbit"
+          value={`${shape} · ${fmt.deg(mission.inclination, family === 'SSO' ? 2 : 1)}`}
+          hint={`Defaults for ${FAMILY_INFO[family].label}. Open Advanced to change them.`}
         />
-        <SliderField
-          id="apogee"
-          label="Apogee altitude"
-          unit="km"
-          min={mission.perigee}
-          max={apogeeMax}
-          step={10}
-          value={mission.apogee}
-          onChange={(apogee) => update({ apogee })}
-          hint={
-            circular
-              ? `Equal to perigee: circular · up to ${apogeeMax.toLocaleString('en-US')} km`
-              : `e = ${orbit.eccentricity.toFixed(4)} · up to ${apogeeMax.toLocaleString('en-US')} km`
-          }
-        />
-        {family === 'SSO' ? (
-          <>
-            <ReadOnlyField
-              label="Inclination"
-              value={fmt.deg(mission.inclination, 2)}
-              hint={`Computed from a = ${orbit.semiMajorAxis.toFixed(1)} km, e = ${orbit.eccentricity.toFixed(4)} so the plane turns with the Sun`}
-            />
-            <div className="space-y-5">
-              <ReadOnlyField
-                label="Equator crossing"
-                value={`Southbound ${hhmm(ORBIT_PLANE.ssoDescendingNodeHours)} mean local solar time`}
-                hint={`Fixed · northbound ${hhmm(ORBIT_PLANE.ssoDescendingNodeHours + 12)} · Ω ${fmt.deg(orbit.raan, 2)} at search start`}
+      </div>
+
+      <div className="space-y-4">
+        <button
+          type="button"
+          aria-expanded={advanced}
+          aria-controls="orbit-advanced"
+          onClick={() => setAdvanced((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+        >
+          <ChevronDown aria-hidden className={cn('size-3.5 transition-transform', advanced && 'rotate-180')} />
+          {advanced ? 'Hide advanced orbit settings' : 'Advanced orbit settings'}
+        </button>
+
+        {advanced && (
+          <div id="orbit-advanced" className="space-y-5 rounded-xl border border-white/5 bg-black/20 p-4">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <SliderField
+                id="perigee"
+                label="Perigee altitude"
+                unit="km"
+                min={alt.min}
+                max={alt.max}
+                step={10}
+                value={mission.perigee}
+                onChange={(perigee) => update({ perigee })}
+                hint={`${alt.min}–${alt.max.toLocaleString('en-US')} km · default ${alt.defaultKm} km`}
               />
-              <PlaneDateField />
-            </div>
-          </>
-        ) : (
-          <>
-            <SliderField
-              id="inclination"
-              label="Inclination"
-              unit="°"
-              min={ORBIT_LIMITS[family].minInc}
-              max={ORBIT_LIMITS[family].maxInc}
-              step={0.1}
-              value={mission.inclination}
-              onChange={(inclination) => update({ inclination })}
-              format={(v) => v.toFixed(1)}
-              hint={
-                family === 'LEO'
-                  ? `${deg(ORBIT_LIMITS.LEO.minInc)}–${deg(ORBIT_LIMITS.LEO.maxInc)} · 45.3° is Canso's latitude, flown due east`
-                  : `${deg(ORBIT_LIMITS.POLAR.minInc)}–${deg(ORBIT_LIMITS.POLAR.maxInc)} · 90° passes over both poles`
-              }
-            />
-<div className="space-y-5">
-              <ReadOnlyField
-                label="Plane orientation (RAAN)"
-                value={
-                  plane
-                    ? `Ω = ${fmt.deg(orbit.raan, 2)} on ${planeDate(plane.localDate)} `
-                    : '—'
-                }
+              <SliderField
+                id="apogee"
+                label="Apogee altitude"
+                unit="km"
+                min={mission.perigee}
+                max={apogeeMax}
+                step={10}
+                value={mission.apogee}
+                onChange={(apogee) => update({ apogee })}
                 hint={
-                  plane
-                    ? `${ORBIT_PLANE.insertionLocalTime[family]} ${fmt.zoneName(plane.insertionTime, SITE.timeZone!)} at Canso, liftoff one ascent earlier · then J2 drift ${analysis.nodalPrecessionDegDay.toFixed(3)}°/day`
-                    : undefined
+                  circular
+                    ? `Equal to perigee: circular · up to ${apogeeMax.toLocaleString('en-US')} km`
+                    : `e = ${orbit.eccentricity.toFixed(4)} · up to ${apogeeMax.toLocaleString('en-US')} km`
                 }
               />
-              <PlaneDateField localDate={plane?.localDate} />
+              {family === 'SSO' ? (
+                <>
+                  <ReadOnlyField
+                    label="Inclination"
+                    value={fmt.deg(mission.inclination, 2)}
+                    hint={`Computed from a = ${orbit.semiMajorAxis.toFixed(1)} km, e = ${orbit.eccentricity.toFixed(4)} so the plane turns with the Sun`}
+                  />
+                  <ReadOnlyField
+                    label="Equator crossing"
+                    value={`Southbound ${hhmm(ORBIT_PLANE.ssoDescendingNodeHours)} mean local solar time`}
+                    hint={`Fixed · northbound ${hhmm(ORBIT_PLANE.ssoDescendingNodeHours + 12)} · Ω ${fmt.deg(orbit.raan, 2)} at search start`}
+                  />
+                </>
+              ) : (
+                <>
+                  <SliderField
+                    id="inclination"
+                    label="Inclination"
+                    unit="°"
+                    min={ORBIT_LIMITS[family].minInc}
+                    max={ORBIT_LIMITS[family].maxInc}
+                    step={0.1}
+                    value={mission.inclination}
+                    onChange={(inclination) => update({ inclination })}
+                    format={(v) => v.toFixed(1)}
+                    hint={
+                      family === 'LEO'
+                        ? `${deg(ORBIT_LIMITS.LEO.minInc)}–${deg(ORBIT_LIMITS.LEO.maxInc)} · 45.3° is Canso's latitude, flown due east`
+                        : `${deg(ORBIT_LIMITS.POLAR.minInc)}–${deg(ORBIT_LIMITS.POLAR.maxInc)} · 90° passes over both poles`
+                    }
+                  />
+                  <ReadOnlyField
+                    label="Plane orientation (RAAN)"
+                    value={plane ? `Ω = ${fmt.deg(orbit.raan, 2)} on ${planeDate(plane.localDate)}` : '—'}
+                    hint={
+                      plane
+                        ? `${ORBIT_PLANE.insertionLocalTime[family]} ${fmt.zoneName(plane.insertionTime, SITE.timeZone!)} at Canso, liftoff one ascent earlier · then J2 drift ${analysis.nodalPrecessionDegDay.toFixed(3)}°/day`
+                        : undefined
+                    }
+                  />
+                </>
+              )}
             </div>
-          </>
+            <button
+              type="button"
+              onClick={() => applyOrbitPreset(family)}
+              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Reset {FAMILY_INFO[family].label} to defaults
+            </button>
+          </div>
         )}
       </div>
+
       <p className="text-[11px] text-muted-foreground">
         {allowed
           ? `Perigee is placed where the ${headingWord(allowed.azimuth)} ascent from Canso reaches orbit, so every window injects at ${Math.round(mission.perigee)} km.`
